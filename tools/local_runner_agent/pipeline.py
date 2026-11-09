@@ -5,6 +5,7 @@ import time
 from dataclasses import asdict
 from typing import Protocol
 
+from .artifacts import ArtifactPackageError, FlutterArtifactPackager
 from .checkout import CheckoutError
 from .execution import ExecutionError, FlutterBuildExecutor
 from .workspace import WorkspaceError, WorkspaceManager
@@ -27,6 +28,7 @@ class RunnerPipeline:
         *,
         heartbeat_interval_seconds: int = 10,
         trusted_repositories: set[str] | frozenset[str] = frozenset(),
+        artifact_packager: FlutterArtifactPackager | None = None,
     ):
         if isinstance(heartbeat_interval_seconds, bool) or not isinstance(heartbeat_interval_seconds, int) or not 5 <= heartbeat_interval_seconds <= 60:
             raise ValueError("heartbeat interval must be between 5 and 60 seconds")
@@ -36,6 +38,7 @@ class RunnerPipeline:
         self.executor = executor
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.trusted_repositories = frozenset(trusted_repositories)
+        self.artifact_packager = artifact_packager or FlutterArtifactPackager(workspaces)
 
     def run_once(self) -> dict | None:
         """Claim at most one job. Returns None when the queue is empty."""
@@ -92,8 +95,16 @@ class RunnerPipeline:
                 "system",
             )
             if outcome == "succeeded":
+                artifact = self.artifact_packager.package(job_id, worker_id, job["target"])
+                if artifact is not None:
+                    artifact_path, artifact_name = artifact
+                    metadata = self.client.upload_artifact(job_id, str(artifact_path), artifact_name)
+                    result["artifact"] = metadata
+                    self.client.append_log(
+                        job_id, f"Artifact stored: {artifact_name} ({metadata['size']} bytes)", "system"
+                    )
                 error_code = None
-        except (CheckoutError, ExecutionError, WorkspaceError) as exc:
+        except (ArtifactPackageError, CheckoutError, ExecutionError, WorkspaceError) as exc:
             self.client.append_log(
                 job_id, f"Runner rejected job safely: {type(exc).__name__}", "stderr"
             )
