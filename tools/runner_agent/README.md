@@ -87,3 +87,23 @@ Tests do not contact the Gateway, clone repositories, or run Flutter builds.
 A real host acceptance test is still required for each supported operating
 system. In particular, macOS readiness is not claimed until a real Mac Runner
 has registered and completed a build.
+
+## Read-only host preflight (first step before enrollment)
+
+Run this on the candidate Windows, Linux, or macOS host:
+
+```sh
+python -m tools.runner_agent.preflight
+python -m tools.runner_agent.preflight --json
+```
+
+Preflight checks installed toolchain commands and reports conservative platform
+capabilities. It does not contact the Gateway, read or print runner tokens,
+install software, clone repositories, or enable execution. A green preflight
+means only that the minimum enrollment tools (Git and Flutter) are present;
+platform capabilities are reported only when their platform toolchain is found.
+Android additionally requires Java and an Android SDK/ADB. Windows requires
+Visual Studio, Linux requires Clang/CMake/Ninja, and macOS/iOS requires Xcode.
+A separate real-host acceptance build is still required before declaring a
+platform production-ready.
+
