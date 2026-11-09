@@ -37,6 +37,8 @@ _DENIED_DIRECTORY_NAMES = {
 _DENIED_FILE_NAMES = {
     ".npmrc", ".pypirc", "credentials.json", "token.json",
     "service-account.json", "service_account.json", "google-credentials.json",
+    "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+    "ssh_host_rsa_key", "ssh_host_ed25519_key", "private_key", "privatekey",
 }
 _DENIED_SUFFIXES = {".pem", ".key", ".p12", ".pfx", ".kdbx"}
 
