@@ -41,7 +41,8 @@ class OwnerCredentialSetupTests(unittest.TestCase):
                 auth.verify_password(record, "owner-kept", "new-owner-passphrase")
             )
             self.assertFalse(auth.verify_password(record, "owner-kept", "x" * 13))
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
 
 class LocalAuthProxyEndToEndTests(unittest.TestCase):
