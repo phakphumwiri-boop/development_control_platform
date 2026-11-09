@@ -906,6 +906,7 @@ async function buildJobsRefresh(){
  }
 }
 async function buildJobCreate(){
+ try{await buildJobsSession();if(!runnerUI.repositories.length)await runnerLoadRepositories()}catch(error){runnerText("build-job-result","BLOCKED: "+error.message);return}
  const repository=$("runner-repository").value;
  const sha=$("runner-commit-sha").value.trim();
  const target=$("build-job-target").value;
