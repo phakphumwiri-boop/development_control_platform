@@ -3,6 +3,11 @@ name: DCP Multi-platform Cloud Runner Provisioning
 on:
   workflow_dispatch:
     inputs:
+      enable_cloud_runner_provisioning:
+        description: Explicitly opt in to cloud runner provisioning (requires both repository safety variables to be true)
+        required: true
+        type: boolean
+        default: false
       target_repository:
         description: Allowlisted repository to receive the ephemeral runner
         required: true
@@ -24,6 +29,7 @@ permissions:
 
 jobs:
   request-cloud-runner:
+    if: ${{ inputs.enable_cloud_runner_provisioning == true && vars.DCP_CLOUD_RUNNER_PROVISIONING_ENABLED == 'true' && vars.DCP_CLOUD_RUNNER_OWNER_APPROVED == 'true' }}
     name: Request ephemeral runner
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -36,6 +42,8 @@ jobs:
           python-version: "3.12"
       - name: Validate and dispatch provider request
         env:
+          DCP_CLOUD_RUNNER_PROVISIONING_ENABLED: ${{ vars.DCP_CLOUD_RUNNER_PROVISIONING_ENABLED }}
+          DCP_CLOUD_RUNNER_OWNER_APPROVED: ${{ vars.DCP_CLOUD_RUNNER_OWNER_APPROVED }}
           DCP_RUNNER_PROVIDER_URL: ${{ secrets.DCP_RUNNER_PROVIDER_URL }}
           DCP_RUNNER_PROVIDER_TOKEN: ${{ secrets.DCP_RUNNER_PROVIDER_TOKEN }}
           DCP_TARGET_REPOSITORY: ${{ inputs.target_repository }}
