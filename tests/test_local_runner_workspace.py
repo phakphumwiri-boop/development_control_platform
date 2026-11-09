@@ -98,7 +98,7 @@ class WorkspaceManagerTests(unittest.TestCase):
         self.assertEqual(claimed["id"], job["id"])
         workspace = self.manager.create(claimed["id"], claimed["worker"])
         (workspace / "checkout-placeholder.txt").write_text(
-            "workspace allocation only; repository checkout is not enabled"
+            "x"
         )
         self.assertGreater(self.manager.check_quota(job["id"], "runner-e2e"), 0)
         self.assertEqual(self.manager.get(job["id"], "runner-e2e"), workspace)
