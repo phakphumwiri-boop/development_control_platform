@@ -18,6 +18,7 @@ from tools.cloud_gateway.budget_guard import AzureBudgetGuard
 from tools.cloud_gateway.service import GatewayService
 from tools.cloud_gateway.store import RunnerStore
 from tools.cloud_gateway.job_control import JobStore
+from tools.cloud_gateway.artifacts import ArtifactStore
 from tools.local_runner_agent.client import GatewayClient, RunnerAgentConfig
 
 SECRET = "test-proxy-secret-that-is-at-least-32-bytes-long"
@@ -44,6 +45,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         self.service = GatewayService(self.settings, self.store, DisabledProvider())
         self.job_store = JobStore(str(Path(self.temp.name) / "jobs.sqlite"))
         self.service.job_store = self.job_store
+        self.service.artifact_store = ArtifactStore(Path(self.temp.name) / "artifacts")
         self.runner_token = "runner-token-for-test-that-is-at-least-32-bytes"
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
@@ -592,6 +594,36 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         finally:
             error.exception.close()
 
+
+    def test_runner_artifact_upload_and_authenticated_dashboard_download(self):
+        job, _ = self.job_store.create({
+            "repository": "phakphum12345/generated-A4-pdf",
+            "commit_sha": "a" * 40,
+            "target": "build",
+        }, "api-artifact-job-0001")
+        claimed = self.job_store.claim("worker-test-01")
+        self.assertEqual(claimed["id"], job["id"])
+        payload = b"compiled-artifact-bytes"
+        artifact_file = Path(self.temp.name) / "app-release.apk"
+        artifact_file.write_bytes(payload)
+        client = GatewayClient(RunnerAgentConfig(
+            gateway_url=self.base,
+            worker_id="worker-test-01",
+            token=self.runner_token,
+        ))
+        metadata = client.upload_artifact(job["id"], str(artifact_file))
+        self.assertEqual(metadata["sha256"], hashlib.sha256(payload).hexdigest())
+
+        list_path = f"/api/jobs/{job['id']}/artifacts"
+        with urlopen(self.request("GET", list_path, "nonce_artifact_list_0001")) as response:
+            listed = json.loads(response.read())["artifacts"]
+        self.assertEqual(listed[0]["id"], metadata["id"])
+
+        download_path = f"/api/artifacts/{metadata['id']}/download"
+        with urlopen(self.request("GET", download_path, "nonce_artifact_download_001")) as response:
+            self.assertEqual(response.read(), payload)
+            self.assertEqual(response.headers.get("ETag"), '"' + metadata["sha256"] + '"')
+            self.assertIn("app-release.apk", response.headers.get("Content-Disposition", ""))
 
 if __name__ == "__main__":
     unittest.main()
