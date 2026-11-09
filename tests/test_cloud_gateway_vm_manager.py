@@ -97,7 +97,7 @@ class VMManagerTests(unittest.TestCase):
         with self.assertRaises(VMQuotaExceeded):
             self.manager.create(
                 name="builder-02", provider_id="fake", image_id=self.image_record["id"],
-                cpu=4, memory_mb=4096, disk_gb=100, idempotency_key="vm-quota-key-0002",
+                cpu=5, memory_mb=4096, disk_gb=100, idempotency_key="vm-quota-key-0002",
             )
         with self.assertRaises(VMConflict):
             self.manager.create(
