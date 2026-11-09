@@ -58,7 +58,8 @@ class RunnerSchedulerTests(unittest.TestCase):
         # A catalog entry or simulated VM does not create a Runner registration.
         self.assertEqual(self.infrastructure.catalog()["images"][2]["target_os"], "macos")
         self.assertEqual(self.scheduler.eligible_runners("build_macos"), [])
-        self.assertIsNone(self.scheduler.claim("unregistered-mac"))
+        with self.assertRaises(RunnerNotRegistered):
+            self.scheduler.claim("unregistered-mac")
         self.registry.register("mac-runner", "macos", ["flutter", "macos"])
         self.assertEqual(self.scheduler.eligible_runners("build_macos")[0]["worker_id"], "mac-runner")
         claimed = self.scheduler.claim("mac-runner")
