@@ -23,6 +23,7 @@ from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
 from .job_control import JobConflict, JobNotFound, JobStore
 from .artifacts import ArtifactError, ArtifactStore
+from .runner_registry import RunnerRegistry, WorkerNotFound
 
 
 class DisabledProvider:
@@ -162,6 +163,9 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def artifact_store(self):
             return getattr(service, "artifact_store", None)
+
+        def runner_registry(self):
+            return getattr(service, "runner_registry", None)
 
         @staticmethod
         def public_job(row):
