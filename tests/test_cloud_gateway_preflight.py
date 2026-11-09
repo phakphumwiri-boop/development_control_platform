@@ -74,6 +74,23 @@ class GatewayPreflightTests(unittest.TestCase):
         self.assertEqual(checks["live_provider_acceptance"]["status"], "SKIPPED")
         self.assertEqual(result["overall"], "UNKNOWN")
 
+    def test_empty_url_userinfo_fails_origin_validation(self):
+        for variable in (
+            "DCP_PUBLIC_ORIGIN",
+            "DCP_AZURE_KEY_VAULT_URL",
+            "DCP_ORKA_URL",
+        ):
+            env = valid_environment()
+            env[variable] = "https://@example.test"
+            result = inspect_environment(env)
+            checks = {item["check"]: item for item in result["checks"]}
+            check_name = {
+                "DCP_PUBLIC_ORIGIN": "trusted_proxy",
+                "DCP_AZURE_KEY_VAULT_URL": "github_app_configuration",
+                "DCP_ORKA_URL": "orka_configuration_presence",
+            }[variable]
+            self.assertEqual(checks[check_name]["status"], "FAIL", variable)
+
     def test_enabled_provisioning_is_a_hard_failure_before_live_acceptance(self):
         env = valid_environment()
         env["DCP_GATEWAY_PROVISIONING_ENABLED"] = "true"
