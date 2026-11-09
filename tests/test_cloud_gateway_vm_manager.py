@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.cloud_gateway.hyperv_provider import HyperVProvider
 from tools.cloud_gateway.vm_manager import (
     VMConflict, VMManager, VMManagerError, VMProvisioningDisabled, VMQuotaExceeded,
 )
@@ -140,6 +141,43 @@ class VMManagerTests(unittest.TestCase):
                 name="bad-cpu", provider_id="fake", image_id=self.image_record["id"],
                 cpu=0, idempotency_key="vm-invalid-key-002",
             )
+
+
+class HyperVProviderTests(unittest.TestCase):
+    def test_provider_is_disabled_by_default_and_uses_fixed_powershell_scripts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            provider = HyperVProvider(root / "vms", "Default Switch", powershell="pwsh")
+            self.assertFalse(provider.available())
+
+            calls = []
+            def fake_runner(command, **kwargs):
+                calls.append((command, kwargs))
+                from types import SimpleNamespace
+                return SimpleNamespace(returncode=0, stdout="fake-hyperv-ref\\n", stderr="")
+
+            provider = HyperVProvider(
+                root / "vms", "Default Switch", enabled=True,
+                powershell="pwsh", command_runner=fake_runner,
+            )
+            provider.available = lambda: True
+            image = root / "base.vhdx"
+            image.write_bytes(b"vhdx-fixture")
+            spec = {
+                "id": "00000000-0000-4000-8000-000000000001",
+                "name": "test-vm", "image_path": str(image),
+                "image_os": "windows", "cpu": 2, "memory_mb": 2048, "disk_gb": 40,
+            }
+            self.assertEqual(provider.create(spec), "fake-hyperv-ref")
+            self.assertFalse(calls[0][1]["shell"])
+            self.assertIn("hyperv_create.ps1", calls[0][0][-1])
+            self.assertEqual(calls[0][1]["env"]["DCP_VM_DISK_GB"], "40")
+            vm = {**spec, "provider_ref": "fake-hyperv-ref"}
+            provider.start(vm)
+            provider.stop(vm)
+            provider.delete(vm)
+            self.assertEqual(len(calls), 4)
+            self.assertFalse((root / "vms" / spec["id"]).exists())
 
 
 if __name__ == "__main__":
