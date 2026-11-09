@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import (
@@ -25,6 +26,22 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+class OwnerCredentialSetupTests(unittest.TestCase):
+    def test_first_time_setup_requires_fourteen_character_password(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "owner-auth.json"
+            with patch("builtins.input", return_value="owner-kept"), patch(
+                "tools.local_auth_proxy.getpass.getpass",
+                side_effect=["x" * 13, "new-owner-passphrase", "new-owner-passphrase"],
+            ):
+                record = auth.load_or_create_credentials(path)
+            self.assertTrue(
+                auth.verify_password(record, "owner-kept", "new-owner-passphrase")
+            )
+            self.assertFalse(auth.verify_password(record, "owner-kept", "x" * 13))
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
 
 class LocalAuthProxyEndToEndTests(unittest.TestCase):
