@@ -178,6 +178,11 @@ class RunnerAgent:
                 raise RuntimeError("Checked-out commit SHA does not match requested immutable SHA")
             self._run(["flutter", "pub", "get"], workspace, job_id)
             self._run(build_command(target), workspace, job_id)
+            # A cancellation can arrive after the final build command has exited.
+            # Re-check the lease before publishing an artifact or reporting success.
+            heartbeat = self.client.heartbeat(job_id, self.lease_seconds)
+            if heartbeat.get("state") == "cancel_requested":
+                raise JobCancelled("Job cancellation was requested")
             artifact_path = package_output(workspace, target)
             artifact = self.client.upload(job_id, artifact_path) if artifact_path else None
             result = {
@@ -185,7 +190,16 @@ class RunnerAgent:
                 "duration_seconds": round(time.monotonic() - started, 2),
                 "artifact": artifact,
             }
-            self.client.finish(job_id, "succeeded", result)
+            try:
+                self.client.finish(job_id, "succeeded", result)
+            except GatewayError:
+                # Close the race where cancellation lands between the last
+                # heartbeat and finish(succeeded). The Gateway correctly rejects
+                # success for cancel_requested jobs; acknowledge cancellation.
+                heartbeat = self.client.heartbeat(job_id, self.lease_seconds)
+                if heartbeat.get("state") == "cancel_requested":
+                    raise JobCancelled("Job cancellation was requested")
+                raise
             return result
 
     @property
