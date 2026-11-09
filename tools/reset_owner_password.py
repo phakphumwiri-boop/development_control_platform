@@ -17,7 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.local_auth_proxy import CREDENTIALS, PORT, password_record  # noqa: E402
+from tools.local_auth_proxy import (  # noqa: E402
+    CREDENTIALS,
+    MIN_PASSWORD_LENGTH,
+    PORT,
+    password_record,
+)
 
 
 def _validate_record(record: object) -> dict:
@@ -57,8 +62,8 @@ def _restrict_file(path: Path) -> None:
 def reset_owner_password(path: Path, password: str, confirmation: str) -> Path:
     """Write a new salted hash and return the protected backup path."""
     path = Path(path)
-    if len(password) < 6:
-        raise ValueError("Password must contain at least 6 characters.")
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"Password must contain at least {MIN_PASSWORD_LENGTH} characters.")
     if password != confirmation:
         raise ValueError("Passwords do not match.")
     if not path.is_file():
@@ -104,7 +109,7 @@ def main() -> int:
     try:
         current = _validate_record(json.loads(CREDENTIALS.read_text(encoding="utf-8")))
         print(f"Owner username (unchanged): {current['username']}")
-        password = getpass.getpass("New Owner password (minimum 6 characters): ")
+        password = getpass.getpass("New Owner password (minimum 14 characters): ")
         confirmation = getpass.getpass("Confirm new password: ")
         backup = reset_owner_password(CREDENTIALS, password, confirmation)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
