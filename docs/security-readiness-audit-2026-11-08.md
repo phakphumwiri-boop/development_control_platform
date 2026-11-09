@@ -29,6 +29,18 @@ This review does **not** establish the live state of processes, listening socket
 | Cloud deployment readiness | **BLOCKED** | The Azure deployment plan is preparation-only. It requires subscription, domain, identity, cost, private ingress, OIDC edge, persistence, provider acceptance, and explicit owner approval before deployment or enablement. |
 | Live endpoints and infrastructure | **UNKNOWN** | No live network probe, process inspection, cloud-account query, or provider API call was performed. |
 
+## Repository governance (live GitHub configuration)
+
+The GitHub repository configuration was checked on 2026-11-09 through the repository and branch APIs:
+
+- Repository: `phakphumwiri-boop/development_control_platform` (public fork of `phakphum12345/development_control_platform`).
+- Default branch: `main`.
+- GitHub reports `main` as **not protected** (`protected: false`).
+- The repository rulesets endpoint returned an empty list.
+- Therefore, the repository currently has no GitHub-enforced required pull-request reviews or required status checks on `main`. The YAML registry policy in this repository is an application-level policy record; it does not itself enforce GitHub branch protection.
+
+This is a governance gap, not evidence of a code vulnerability. Before treating this fork as a controlled release repository, an administrator should configure a branch ruleset for `main` that requires pull requests, requires the applicable CI checks, blocks force-push and deletion, and requires review/approval appropriate to the repository's ownership model. The exact required check names should be taken from stable completed GitHub Actions runs, not guessed. No branch protection or ruleset settings were changed as part of this audit.
+
 ## Verified source controls
 
 ### Local-only service boundary
