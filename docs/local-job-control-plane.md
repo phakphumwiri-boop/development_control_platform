@@ -21,6 +21,8 @@ Runner routes use credentials separate from the gateway's internal API token and
 - `POST /v1/runner/{id}/heartbeat` — renew the authenticated worker's active lease.
 - `POST /v1/runner/{id}/logs` — append a bounded stdout/stderr/system log message.
 - `POST /v1/runner/{id}/finish` — report `succeeded|failed|cancelled`; only the current lease owner can finish.
+- `POST /v1/runner/{id}/artifacts` — upload one bounded `application/octet-stream` artifact while the authenticated worker owns the active lease.
+- `GET /api/artifacts/{artifact_id}/download` — authenticated Dashboard download with SHA-256 integrity verification.
 
 The jobs database defaults to `DCP_GATEWAY_DATABASE + ".jobs"`; override with `DCP_GATEWAY_JOBS_DATABASE`.
 
@@ -106,3 +108,16 @@ python -m tools.local_runner_agent --once
 ```
 
 The command processes no more than one queued job. The host must have the Flutter SDK installed and on PATH. The Flutter process runs on the Runner host rather than inside an OS sandbox; do not add repositories to the trusted list unless their build/test code is approved for execution on that host.
+
+
+## M7 — Artifact Center
+
+- Flutter build output is collected from target-specific output paths. Single-file outputs (APK/AAB) are stored directly; directory outputs (Web, Windows, Linux, macOS, iOS) are packaged into a bounded ZIP.
+- Runner uploads use a dedicated bearer-authenticated endpoint and a sanitized filename header; browser credentials are never used for Runner upload.
+- Gateway storage uses a private absolute directory (default: `<DCP_GATEWAY_DATABASE>.artifacts`) configurable with `DCP_GATEWAY_ARTIFACTS_ROOT`.
+- `DCP_GATEWAY_MAX_ARTIFACT_BYTES` controls the per-artifact upload limit (default 100 MiB; maximum 1 GiB).
+- Each artifact receives a UUID, job/worker ownership record, size, creation timestamp, and SHA-256 digest. Upload requires a current Job lease and verifies it again after writing.
+- Files are written to private temporary files and atomically moved into storage. Download verifies the stored SHA-256 before streaming the file.
+- Dashboard APIs expose metadata only; the download route requires an authenticated owner/operator session and sets private/no-store and nosniff headers.
+- The Dashboard Build Jobs panel displays successful Job artifacts with authenticated download links. Artifacts are not exposed for failed or cancelled Jobs.
+- Retention pruning is available through `ArtifactStore.prune(retention_days=30)`; scheduling retention is an operator responsibility and is not enabled automatically in this increment.
