@@ -24,6 +24,7 @@ from .github_app_runtime import build_github_app_runtime
 from .job_control import JobConflict, JobNotFound, JobStore
 from .artifacts import ArtifactError, ArtifactStore
 from .runner_registry import RunnerRegistry, WorkerNotFound
+from .scheduler import RunnerScheduler, RunnerNotEligible, RunnerNotRegistered
 from .infrastructure import (FakeInfrastructureProvider, InfrastructureManager,
                              InfrastructureStore, ProviderUnavailable, ResourceNotFound)
 
@@ -171,6 +172,18 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def infrastructure_manager(self):
             return getattr(service, "infrastructure_manager", None)
+
+        def runner_scheduler(self):
+            scheduler = getattr(service, "runner_scheduler", None)
+            if scheduler is not None:
+                return scheduler
+            jobs = self.job_store()
+            registry = self.runner_registry()
+            if jobs is None or registry is None:
+                return None
+            scheduler = RunnerScheduler(jobs, registry, self.infrastructure_manager())
+            service.runner_scheduler = scheduler
+            return scheduler
 
         @staticmethod
         def public_infrastructure(row):
@@ -646,14 +659,17 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                         jobs.recover_expired_leases()
                         registry = self.runner_registry()
                         if registry is not None:
-                            runner = registry.get(worker)
-                            if runner is None:
+                            scheduler = self.runner_scheduler()
+                            if scheduler is None:
+                                return self.send_json(503, {"error": "Runner Scheduler unavailable"})
+                            try:
+                                row = scheduler.claim(worker, lease)
+                            except RunnerNotRegistered:
                                 return self.send_json(409, {"error": "Runner must register before claiming jobs"})
-                            if runner.get("state") != "online":
+                            except RunnerNotEligible:
                                 return self.send_json(409, {"error": "Runner is offline or draining"})
-                            row = jobs.claim(worker, lease, registry.allowed_targets(worker))
                         else:
-                            row = jobs.claim(worker, lease)
+                            return self.send_json(503, {"error": "Runner Registry unavailable; refusing unfiltered job claim"})
                         return self.send_json(200, {"job": self.public_job(row) if row else None})
                     parts = path[len("/v1/runner/"):].split("/")
                     if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
