@@ -99,11 +99,14 @@ python -m tools.runner_agent.preflight --json
 
 Preflight checks installed toolchain commands and reports conservative platform
 capabilities. It does not contact the Gateway, read or print runner tokens,
-install software, clone repositories, or enable execution. A green preflight
-means only that the minimum enrollment tools (Git and Flutter) are present;
-platform capabilities are reported only when their platform toolchain is found.
+install software, clone repositories, or enable execution. The
+`minimum_agent_prerequisites_met` field means only that Git and Flutter are
+present; it does **not** mean the host is enrolled or ready to execute jobs.
+Platform capabilities are reported only when their platform toolchain is found.
 Android additionally requires Java and an Android SDK/ADB. Windows requires
 Visual Studio, Linux requires Clang/CMake/Ninja, and macOS/iOS requires Xcode.
 A separate real-host acceptance build is still required before declaring a
 platform production-ready.
 
+Version probes decode subprocess output as UTF-8 with replacement handling so
+Windows console code pages cannot crash the preflight reader thread.
