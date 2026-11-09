@@ -24,6 +24,8 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+from .preflight import collect_preflight
+
 
 class GatewayError(RuntimeError):
     pass
@@ -59,6 +61,9 @@ class GatewayClient:
 
     def register(self, host_os, capabilities):
         return self.request("/v1/runner/register", {"host_os": host_os, "capabilities": capabilities})
+
+    def enroll(self, host_os, capabilities):
+        return self.request("/v1/runner/enroll", {"host_os": host_os, "capabilities": capabilities})
 
     def ping(self):
         return self.request("/v1/runner/ping", {})
@@ -271,21 +276,56 @@ class RunnerAgent:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="DCP opt-in local Runner Agent")
+    parser = argparse.ArgumentParser(description="DCP local Runner Agent")
     parser.add_argument("--once", action="store_true", help="claim and process at most one job")
+    parser.add_argument(
+        "--enroll-only", action="store_true",
+        help="register this host as offline; never ping, claim, checkout, or execute jobs",
+    )
     args = parser.parse_args(argv)
     base_url = os.environ.get("DCP_GATEWAY_URL", "").strip()
     token = os.environ.get("DCP_RUNNER_TOKEN", "")
     worker = os.environ.get("DCP_RUNNER_ID", "").strip()
-    caps = [part.strip() for part in os.environ.get("DCP_RUNNER_CAPABILITIES", "flutter").split(",") if part.strip()]
+    configured_caps = os.environ.get("DCP_RUNNER_CAPABILITIES", "").strip()
     if not base_url.startswith("https://") and not base_url.startswith("http://127.0.0.1"):
         parser.error("DCP_GATEWAY_URL must use HTTPS (HTTP is allowed only for loopback)")
     if len(token) < 32 or not worker:
         parser.error("Set DCP_RUNNER_ID and a DCP_RUNNER_TOKEN of at least 32 characters")
-    if os.environ.get("DCP_RUNNER_EXECUTION_ENABLED", "").lower() != "true":
-        parser.error("Execution is disabled. Set DCP_RUNNER_EXECUTION_ENABLED=true only on a trusted disposable host.")
+
+    # Both enrollment and execution use the same conservative, local-only probe.
+    # Capabilities explicitly configured by an operator may only reduce the detected set.
+    report = collect_preflight()
+    if not report["minimum_agent_prerequisites_met"]:
+        parser.error("Runner host preflight failed: Git and Flutter are required")
+    current_host = host_os()
+    if report["host_os"] != current_host or current_host not in report["detected_capabilities"]:
+        parser.error("Runner host preflight did not verify the complete host platform toolchain")
+    detected = set(report["detected_capabilities"])
+    if configured_caps:
+        caps = sorted({part.strip() for part in configured_caps.split(",") if part.strip()})
+        if not caps or not set(caps).issubset(detected):
+            parser.error("DCP_RUNNER_CAPABILITIES must be a non-empty subset of preflight-detected capabilities")
+    else:
+        caps = sorted(detected)
+
     client = GatewayClient(base_url, token)
-    client.register(host_os(), sorted(set(caps + [host_os()])))
+    if args.enroll_only:
+        # This endpoint persists an offline registration. It cannot receive work.
+        result = client.enroll(current_host, caps)
+        runner = result.get("runner", {})
+        print(json.dumps({
+            "enrolled": True,
+            "worker_id": runner.get("worker_id", worker),
+            "host_os": runner.get("host_os", current_host),
+            "capabilities": runner.get("capabilities", caps),
+            "state": runner.get("state", "offline"),
+            "execution_enabled": False,
+        }, sort_keys=True))
+        return 0
+
+    if os.environ.get("DCP_RUNNER_EXECUTION_ENABLED", "").lower() != "true":
+        parser.error("Execution is disabled. Use --enroll-only to register without executing jobs.")
+    client.register(current_host, caps)
     agent = RunnerAgent(client, worker, caps)
     while True:
         client.ping()
