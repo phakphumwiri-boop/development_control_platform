@@ -37,3 +37,42 @@ python -m unittest tests.test_cloud_gateway_infrastructure -v
 ```
 
 The tests use temporary SQLite databases and the fake provider only. Live infrastructure acceptance remains a separate, explicitly approved phase.
+
+
+## Authenticated Gateway API — Phase 2
+
+The Gateway composes a persistent `InfrastructureManager` using
+`DCP_GATEWAY_INFRA_DATABASE` (defaults to the gateway database path plus
+`.infra`) and registers only the `fake` provider. The composition hard-codes
+`provisioning_enabled=False`; it is not enabled by an environment variable.
+
+All browser endpoints require a trusted proxy identity. Mutating requests also
+require the configured exact same-origin and server-issued CSRF token.
+
+| Method | Route | Permission | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/infrastructure?view=catalog` | owner/operator | Provider, image and template catalog |
+| GET | `/api/infrastructure` | owner/operator | Resource inventory |
+| GET | `/api/infrastructure/{uuid}` | owner/operator | Inspect one resource |
+| GET | `/api/infrastructure/{uuid}/events` | owner/operator | Lifecycle audit |
+| POST | `/api/infrastructure` | owner/operator | Create fake resource; requires Idempotency-Key |
+| POST | `/api/infrastructure/{uuid}/start` | owner/operator | Start simulation |
+| POST | `/api/infrastructure/{uuid}/stop` | owner/operator | Stop simulation |
+| POST | `/api/infrastructure/{uuid}/restart` | owner/operator | Restart simulation |
+| DELETE | `/api/infrastructure/{uuid}` | owner | Delete simulation |
+
+The dashboard's Infrastructure Manager view talks only to the same-origin
+Gateway API. It does not hold Gateway credentials or call provider SDKs.
+GitHub Pages/static-only deployments cannot perform these operations without
+the trusted authenticated API backend.
+
+## Validation
+
+```sh
+python -m unittest tests.test_cloud_gateway_infrastructure -v
+python -m unittest tests.test_cloud_gateway_infrastructure_api -v
+```
+
+The API tests sign local proxy assertions and run against an ephemeral loopback
+HTTP server with temporary SQLite files. They exercise owner/operator access
+and the fake provider only.
