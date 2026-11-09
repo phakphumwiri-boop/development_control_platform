@@ -149,7 +149,7 @@ class JobStore:
             supported = {"test", "build", "package", "build_android", "build_web",
                          "build_windows", "build_linux", "build_macos", "build_ios"}
             if (not isinstance(allowed_targets, (list, tuple, set, frozenset))
-                    or any(item not in supported for item in allowed_targets)):
+                    or any(not isinstance(item, str) or item not in supported for item in allowed_targets)):
                 raise ValueError("Invalid allowed target list")
             allowed_targets = sorted(set(allowed_targets))
             if not allowed_targets:
