@@ -100,7 +100,7 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
             os.environ["PATH"] = old_path
         self.assertEqual(result["outcome"], "succeeded")
         self.assertEqual(result["job"]["state"], "succeeded")
-        self.assertTrue(any("fixture-flutter-build-ok" in message for _, message in logs))
+        self.assertTrue(any("fixture-flutter-build-ok" in row["message"] for row in self.jobs.logs(job["id"])))
         self.assertFalse((self.root / "workspaces" / job["id"]).exists())
         events = self.jobs.events(job["id"])
         self.assertIn("running", [event["event"] for event in events])
