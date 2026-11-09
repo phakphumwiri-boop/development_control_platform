@@ -117,7 +117,7 @@ class VMManager:
             """)
             conn.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS vm_active_name_idx
-                ON virtual_machines(provider,name) WHERE state != 'deleted'
+                ON virtual_machines(provider,name) WHERE state NOT IN ('deleted','failed')
             """)
 
     @contextmanager
@@ -193,6 +193,24 @@ class VMManager:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    @staticmethod
+    def _verify_image(image: sqlite3.Row | dict) -> None:
+        path = Path(image["path"])
+        if path.is_symlink() or not path.is_absolute() or not path.is_file():
+            raise VMManagerError("registered VM image is missing or unsafe")
+        info = path.stat()
+        if info.st_size != image["size"]:
+            raise VMManagerError("registered VM image size changed")
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        if digest.hexdigest() != image["sha256"]:
+            raise VMManagerError("registered VM image SHA-256 changed")
+
     def _vm(self, vm_id: str) -> dict:
         try:
             if str(uuid.UUID(vm_id)) != vm_id:
@@ -240,7 +258,8 @@ class VMManager:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValueError(f"{field} is outside configured bounds")
-        provider = self._provider(provider_id)
+        if provider_id not in self.providers:
+            raise VMManagerError("VM provider is not configured")
         try:
             if str(uuid.UUID(image_id)) != image_id:
                 raise ValueError
@@ -269,6 +288,8 @@ class VMManager:
             ).fetchone()
             if image is None or image["provider"] != provider_id:
                 raise VMManagerError("enabled VM image for this provider was not found")
+            self._verify_image(image)
+            provider = self._provider(provider_id)
             usage = conn.execute("""
                 SELECT COUNT(*) AS count, COALESCE(SUM(cpu),0) AS cpu,
                        COALESCE(SUM(memory_mb),0) AS memory_mb,
