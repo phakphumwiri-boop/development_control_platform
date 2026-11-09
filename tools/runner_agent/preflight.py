@@ -22,8 +22,13 @@ def _tool(name: str, version_args=("--version",)) -> dict:
     version = None
     try:
         result = subprocess.run(
-            [executable, *version_args], capture_output=True, text=True,
-            timeout=8, check=False,
+            [executable, *version_args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+            check=False,
         )
         output = (result.stdout or result.stderr).strip().splitlines()
         version = output[0][:240] if output else None
@@ -45,7 +50,12 @@ def _visual_studio() -> dict:
     try:
         result = subprocess.run(
             [str(executable), "-latest", "-property", "installationVersion"],
-            capture_output=True, text=True, timeout=8, check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+            check=False,
         )
         version = result.stdout.strip() or None
     except (OSError, subprocess.TimeoutExpired):
@@ -99,7 +109,7 @@ def collect_preflight() -> dict:
         "tools": tools,
         "detected_capabilities": sorted(set(capabilities)),
         "missing_required_tools": missing,
-        "ready_for_runner_enrollment": not missing,
+        "minimum_agent_prerequisites_met": not missing,
         "execution_enabled": False,
         "gateway_contacted": False,
     }
@@ -111,7 +121,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     report = collect_preflight()
     if args.json:
-        print(json.dumps(report, indent=2, sort_keys=True))
+        print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True))
     else:
         print("DCP Runner Host Preflight (read-only)")
         print("Host OS:", report["host_os"])
@@ -119,10 +129,13 @@ def main(argv=None) -> int:
             state = "FOUND" if info["installed"] else "MISSING"
             print(f"- {name}: {state}" + (f" ({info['version']})" if info.get("version") else ""))
         print("Detected capabilities:", ", ".join(report["detected_capabilities"]) or "none")
-        print("Ready for enrollment:", "yes" if report["ready_for_runner_enrollment"] else "no")
+        print(
+            "Minimum agent prerequisites:",
+            "met" if report["minimum_agent_prerequisites_met"] else "missing",
+        )
         print("Execution enabled: no")
         print("Gateway contacted: no")
-    return 0 if report["ready_for_runner_enrollment"] else 1
+    return 0 if report["minimum_agent_prerequisites_met"] else 1
 
 
 if __name__ == "__main__":
