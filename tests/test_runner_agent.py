@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from tools.runner_agent.agent import GatewayClient, GatewayError, RunnerAgent, build_command, package_output
+from tools.runner_agent.agent import GatewayClient, GatewayError, JobCancelled, RunnerAgent, build_command, package_output
 
 
 class RunnerAgentTests(unittest.TestCase):
