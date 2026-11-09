@@ -5,16 +5,7 @@ entries and Fake Provider resources are never treated as executable hosts.
 """
 from __future__ import annotations
 
-from .job_control import JobConflict
 from .runner_registry import RunnerRegistry
-
-
-_TARGET_HOST = {
-    "build_linux": "linux",
-    "build_windows": "windows",
-    "build_macos": "macos",
-    "build_ios": "macos",
-}
 
 
 class RunnerScheduler:
@@ -24,21 +15,6 @@ class RunnerScheduler:
         self.jobs = jobs
         self.registry = registry
         self.infrastructure_manager = infrastructure_manager
-
-    @staticmethod
-    def _compatible_targets(runner):
-        if not runner or runner.get("state") != "online":
-            return []
-        host_os = runner.get("host_os")
-        allowed = set()
-        for target in RunnerRegistryTargets.ALL:
-            if target not in RunnerRegistryTargets.REQUIRES_HOST or RunnerRegistryTargets.REQUIRES_HOST[target] == host_os:
-                allowed.add(target)
-        # Registry remains the source of truth for advertised tools/capabilities.
-        return sorted(allowed.intersection(
-            # allowed_targets also checks liveness and the registered capability set.
-            _registry_targets(runner)
-        ))
 
     def eligible_runners(self, target):
         if target not in RunnerRegistryTargets.ALL:
@@ -107,23 +83,3 @@ class RunnerRegistryTargets:
         "build_ios": "macos",
     }
 
-
-def _registry_targets(runner):
-    """Return target capabilities from the row without trusting request input."""
-    caps = set(runner.get("capabilities") or [])
-    targets = set()
-    if "flutter" in caps:
-        targets.update(("test", "build", "package"))
-    if "android" in caps:
-        targets.add("build_android")
-    if "web" in caps:
-        targets.add("build_web")
-    if "linux" in caps:
-        targets.add("build_linux")
-    if "windows" in caps:
-        targets.add("build_windows")
-    if "macos" in caps:
-        targets.add("build_macos")
-    if "macos" in caps and "ios" in caps:
-        targets.add("build_ios")
-    return targets
