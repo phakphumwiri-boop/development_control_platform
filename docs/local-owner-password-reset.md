@@ -12,4 +12,4 @@ The reset tool operates only on `%LOCALAPPDATA%\DCP\owner-auth.json` (or the pat
 
 If the credential file is missing or invalid, the tool stops without creating a new Owner account. Preserve the DCP data directory and investigate rather than deleting it.
 
-Passwords of fourteen characters are accepted as requested, but a longer unique passphrase is strongly recommended. The local service remains bound to loopback; do not expose its ports to a network.
+New Owner passwords must contain at least 14 characters; a longer unique passphrase is strongly recommended. The local service remains bound to loopback; do not expose its ports to a network.
