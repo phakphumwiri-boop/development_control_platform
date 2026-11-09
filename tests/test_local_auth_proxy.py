@@ -265,6 +265,7 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
             preauth["csrfToken"],
         )
         self.assertEqual(logged_in, 200)
+        self.assertNotIn("127.0.0.1", self.app.failures)
 
         session_status, _, session_body = self.request(
             "/api/auth/session"
