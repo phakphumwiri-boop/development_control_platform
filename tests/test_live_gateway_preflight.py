@@ -31,6 +31,8 @@ class LiveGatewayPreflightTests(unittest.TestCase):
         for value in (
             "http://gateway.example.test",
             "https://user:pass@gateway.example.test",
+            "https://@gateway.example.test",
+            "https://:pass@gateway.example.test",
             "https://gateway.example.test/api",
             "https://gateway.example.test/?token=secret",
             "https://gateway.example.test/#fragment",
