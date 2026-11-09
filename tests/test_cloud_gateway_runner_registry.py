@@ -33,6 +33,19 @@ class RunnerRegistryTests(unittest.TestCase):
         self.assertEqual(enabled["state"], "online")
         self.assertIn("build_android", self.registry.allowed_targets("runner-linux"))
 
+    def test_enrollment_records_host_offline_until_agent_starts(self):
+        enrolled = self.registry.register(
+            "runner-enrolled", "windows", ["flutter", "windows"], online=False
+        )
+        self.assertEqual(enrolled["state"], "offline")
+        self.assertEqual(self.registry.allowed_targets("runner-enrolled"), [])
+
+        active = self.registry.register(
+            "runner-enrolled", "windows", ["flutter", "windows"], online=True
+        )
+        self.assertEqual(active["state"], "online")
+        self.assertIn("build_windows", self.registry.allowed_targets("runner-enrolled"))
+
     def test_stale_runner_is_reported_offline_and_cannot_claim(self):
         self.registry.register("runner-stale", "linux", ["flutter", "linux"])
         with self.registry.db() as conn:
