@@ -54,7 +54,7 @@ class RunnerPreflightTests(unittest.TestCase):
 
     @patch("tools.runner_agent.preflight.subprocess.run")
     @patch("tools.runner_agent.preflight.shutil.which", return_value="C:/flutter/bin/flutter.bat")
-    def test_tool_version_probe_uses_utf8_replacement_decoding(self, run, _which):
+    def test_tool_version_probe_uses_utf8_replacement_decoding(self, _which, run):
         run.return_value.stdout = "Flutter 3.44.4"
         run.return_value.stderr = ""
         report = preflight._tool("flutter")
