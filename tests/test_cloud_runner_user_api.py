@@ -644,5 +644,48 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         finally:
             error.exception.close()
 
+    def test_runner_registry_dashboard_liveness_and_drain_gates_claim(self):
+        job, _ = self.job_store.create({
+            "repository": "example/private-app", "commit_sha": "f" * 40, "target": "test"
+        }, "runner-registry-job-0001")
+        client = GatewayClient(RunnerAgentConfig(
+            gateway_url=self.base, worker_id="worker-test-01", token=self.runner_token,
+        ))
+        registered = client.register("linux", ["flutter", "linux"])
+        self.assertEqual(registered["state"], "online")
+        self.assertEqual(client.heartbeat_worker()["state"], "online")
+
+        with urlopen(self.request("GET", "/api/runners", "nonce_runner_registry_list_01")) as response:
+            workers = json.loads(response.read())["runners"]
+        self.assertEqual(workers[0]["worker_id"], "worker-test-01")
+        self.assertEqual(workers[0]["state"], "online")
+
+        csrf = self._csrf("nonce_runner_registry_csrf_001")
+        with urlopen(self._dashboard_post(
+            "/api/runners/worker-test-01/drain", "nonce_runner_registry_drain_01", {},
+            csrf=csrf,
+        )) as response:
+            self.assertEqual(json.loads(response.read())["runner"]["state"], "draining")
+
+        claim_request = Request(
+            self.base + "/v1/runner/claim", data=b'{"lease_seconds":60}', method="POST",
+            headers={"Authorization": "Bearer " + self.runner_token,
+                     "Content-Type": "application/json"},
+        )
+        with self.assertRaises(HTTPError) as error:
+            urlopen(claim_request)
+        try:
+            self.assertEqual(error.exception.code, 409)
+        finally:
+            error.exception.close()
+
+        with urlopen(self._dashboard_post(
+            "/api/runners/worker-test-01/enable", "nonce_runner_registry_enable_01", {},
+            csrf=csrf,
+        )) as response:
+            self.assertEqual(json.loads(response.read())["runner"]["state"], "online")
+        claimed = client.claim(lease_seconds=60)
+        self.assertEqual(claimed["id"], job["id"])
+
 if __name__ == "__main__":
     unittest.main()
