@@ -91,14 +91,20 @@ class RunnerRegistry:
             item["state"] = "offline"
         return item
 
-    def register(self, worker_id: str, host_os: str, capabilities: list[str]) -> dict:
+    def register(
+        self, worker_id: str, host_os: str, capabilities: list[str], *, online: bool = True
+    ) -> dict:
+        if not isinstance(online, bool):
+            raise ValueError("online must be a boolean")
         self._validate(worker_id, host_os, capabilities)
         now = _now().isoformat()
         with self.lock, self.db() as conn:
             old = conn.execute(
                 "SELECT state,registered_at FROM local_runners WHERE worker_id=?", (worker_id,)
             ).fetchone()
-            state = "draining" if old and old["state"] == "draining" else "online"
+            # Enrollment records an installed host without claiming it is live.
+            # A currently draining runner remains draining until an owner enables it.
+            state = "draining" if old and old["state"] == "draining" else ("online" if online else "offline")
             registered_at = old["registered_at"] if old else now
             conn.execute("""
                 INSERT INTO local_runners(worker_id,host_os,capabilities,state,registered_at,last_seen)
