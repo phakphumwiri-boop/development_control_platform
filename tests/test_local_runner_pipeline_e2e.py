@@ -158,6 +158,7 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
             pipeline = RunnerPipeline(
                 self.client, self.manager, _FixtureCheckout(self.manager), executor,
                 trusted_repositories={"owner/mobile-app"},
+                capabilities={"flutter", "linux", "android"},
             )
             result = pipeline.run_once()
         finally:
