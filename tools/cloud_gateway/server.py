@@ -230,6 +230,8 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                         row = jobs.get(parts[0])
                         return self.send_json(200, self.public_job(row)) if row else self.send_json(404, {"error": "not found"})
                     if len(parts) == 2 and parts[1] == "artifacts":
+                        if jobs.get(parts[0]) is None:
+                            return self.send_json(404, {"error": "not found"})
                         artifacts = self.artifact_store()
                         if artifacts is None:
                             return self.send_json(503, {"error": "artifact storage unavailable"})
@@ -243,6 +245,8 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                         return self.send_json(200, {"logs": jobs.logs(parts[0], after_id, limit)})
                 except JobNotFound:
                     return self.send_json(404, {"error": "not found"})
+                except ArtifactError:
+                    return self.send_json(400, {"error": "invalid artifact request"})
                 except ValueError:
                     return self.send_json(400, {"error": "invalid pagination"})
                 return self.send_json(404, {"error": "not found"})
