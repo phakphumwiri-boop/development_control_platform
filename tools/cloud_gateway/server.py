@@ -823,6 +823,12 @@ def main():
         service.artifact_store = ArtifactStore(artifact_root, artifact_limit)
     except (ValueError, ArtifactError) as exc:
         raise SystemExit("DCP artifact storage configuration is invalid") from exc
+    runner_registry_path = os.getenv("DCP_GATEWAY_RUNNERS_DATABASE", database_path + ".runners")
+    try:
+        runner_stale_seconds = int(os.getenv("DCP_GATEWAY_RUNNER_STALE_SECONDS", "60"))
+        service.runner_registry = RunnerRegistry(runner_registry_path, runner_stale_seconds)
+    except (ValueError, OSError) as exc:
+        raise SystemExit("DCP Runner registry configuration is invalid") from exc
     _start_expiry_reconciler(service, int(os.getenv("DCP_GATEWAY_RECONCILE_SECONDS", "30")))
     server = ThreadingHTTPServer(
         (host, port), make_handler(service, settings.api_token, proxy_secret, public_origin, runner_tokens)
