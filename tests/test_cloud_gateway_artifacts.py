@@ -62,5 +62,16 @@ class ArtifactStoreTests(unittest.TestCase):
             self.artifacts.get("../../metadata.sqlite3")
 
 
+    def test_download_rejects_blob_tampering(self):
+        payload = b"original-build-output"
+        metadata = self.artifacts.store(
+            self.jobs, self.job["id"], "runner-artifact", "bundle.zip",
+            io.BytesIO(payload), len(payload),
+        )
+        _, path = self.artifacts.get(metadata["id"])
+        path.write_bytes(b"tampered-build-output")
+        with self.assertRaises(ArtifactError):
+            self.artifacts.open(metadata["id"])
+
 if __name__ == "__main__":
     unittest.main()
