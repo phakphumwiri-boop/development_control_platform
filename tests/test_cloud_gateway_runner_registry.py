@@ -58,6 +58,14 @@ class RunnerRegistryTests(unittest.TestCase):
             self.registry.drain("unknown-worker")
 
 
+    def test_ios_target_requires_explicit_ios_capability_on_macos(self):
+        self.registry.register("runner-mac", "macos", ["flutter", "macos"])
+        self.assertIn("build_macos", self.registry.allowed_targets("runner-mac"))
+        self.assertNotIn("build_ios", self.registry.allowed_targets("runner-mac"))
+        self.registry.register("runner-mac", "macos", ["flutter", "macos", "ios"])
+        self.assertIn("build_ios", self.registry.allowed_targets("runner-mac"))
+
+
 class CapabilityAwareJobClaimTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
