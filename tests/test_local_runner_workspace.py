@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from tools.local_runner_agent.workspace import WorkspaceError, WorkspaceManager
+from tools.cloud_gateway.job_control import JobStore
 
 
 class WorkspaceManagerTests(unittest.TestCase):
@@ -83,6 +84,29 @@ class WorkspaceManagerTests(unittest.TestCase):
         with self.assertRaises(WorkspaceError):
             WorkspaceManager(link)
 
+
+    def test_job_claim_workspace_and_cleanup_end_to_end(self):
+        database = self.root.parent / "jobs.sqlite3"
+        store = JobStore(str(database))
+        job, created = store.create({
+            "repository": "example/mobile-app",
+            "commit_sha": "f" * 40,
+            "target": "build",
+        }, "workspace-e2e-key-0001")
+        self.assertTrue(created)
+        claimed = store.claim("runner-e2e")
+        self.assertEqual(claimed["id"], job["id"])
+        workspace = self.manager.create(claimed["id"], claimed["worker"])
+        (workspace / "checkout-placeholder.txt").write_text(
+            "workspace allocation only; repository checkout is not enabled"
+        )
+        self.assertGreater(self.manager.check_quota(job["id"], "runner-e2e"), 0)
+        self.assertEqual(self.manager.get(job["id"], "runner-e2e"), workspace)
+        self.manager.cleanup(job["id"], "runner-e2e")
+        self.assertFalse(workspace.exists())
+        completed = store.finish(job["id"], "runner-e2e", "cancelled",
+                                 {"workspace_cleaned": True})
+        self.assertEqual(completed["state"], "cancelled")
 
 if __name__ == "__main__":
     unittest.main()
