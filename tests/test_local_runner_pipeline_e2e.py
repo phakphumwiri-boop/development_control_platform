@@ -86,7 +86,7 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
         self.assertTrue(created)
         old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = self._fake_flutter(
-            "#!/bin/sh\nprintf 'fixture-flutter-build-ok\\n'\nexit 0\n"
+            "#!/bin/sh\nprintf 'fixture-flutter-build-ok\n'\nexit 0\n"
         )
         logs = []
         try:
@@ -143,10 +143,10 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
         }, "runner-pipeline-artifact-001")
         old_path = os.environ.get("PATH", "")
         script = (
-            "#!/bin/sh\\n"
-            "mkdir -p build/app/outputs/flutter-apk\\n"
-            "printf 'fixture-apk-bytes' > build/app/outputs/flutter-apk/app-release.apk\\n"
-            "exit 0\\n"
+            "#!/bin/sh\n"
+            "mkdir -p build/app/outputs/flutter-apk\n"
+            "printf 'fixture-apk-bytes' > build/app/outputs/flutter-apk/app-release.apk\n"
+            "exit 0\n"
         )
         os.environ["PATH"] = self._fake_flutter(script)
         try:
