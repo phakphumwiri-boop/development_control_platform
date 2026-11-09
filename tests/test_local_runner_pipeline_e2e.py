@@ -8,6 +8,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from tools.cloud_gateway.job_control import JobStore
+from tools.cloud_gateway.artifacts import ArtifactStore
 from tools.cloud_gateway.server import make_handler
 from tools.local_runner_agent.client import GatewayClient, RunnerAgentConfig
 from tools.local_runner_agent.execution import FlutterBuildExecutor
@@ -19,8 +20,9 @@ TOKEN = "runner-pipeline-e2e-token-which-is-long-enough"
 
 
 class _Service:
-    def __init__(self, jobs):
+    def __init__(self, jobs, artifacts=None):
         self.job_store = jobs
+        self.artifact_store = artifacts
 
 
 class _FixtureCheckout:
@@ -44,9 +46,10 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.jobs = JobStore(str(self.root / "jobs.sqlite3"))
+        self.artifacts = ArtifactStore(self.root / "artifacts")
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            make_handler(_Service(self.jobs), "internal-gateway-token", runner_tokens={
+            make_handler(_Service(self.jobs, self.artifacts), "internal-gateway-token", runner_tokens={
                 "runner-e2e": TOKEN,
             }),
         )
@@ -130,6 +133,39 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
         self.assertEqual(result["job"]["state"], "cancelled")
         self.assertFalse((self.root / "workspaces" / job["id"]).exists())
 
+
+    @unittest.skipIf(os.name == "nt", "POSIX fixture executable used for deterministic process tests")
+    def test_flutter_build_artifact_is_uploaded_hashed_and_available_after_job_finishes(self):
+        job, _ = self.jobs.create({
+            "repository": "owner/mobile-app",
+            "commit_sha": "c" * 40,
+            "target": "build_android",
+        }, "runner-pipeline-artifact-001")
+        old_path = os.environ.get("PATH", "")
+        script = (
+            "#!/bin/sh\\n"
+            "mkdir -p build/app/outputs/flutter-apk\\n"
+            "printf 'fixture-apk-bytes' > build/app/outputs/flutter-apk/app-release.apk\\n"
+            "exit 0\\n"
+        )
+        os.environ["PATH"] = self._fake_flutter(script)
+        try:
+            executor = FlutterBuildExecutor(self.manager, enabled=True, timeout_seconds=10)
+            pipeline = RunnerPipeline(
+                self.client, self.manager, _FixtureCheckout(self.manager), executor,
+                trusted_repositories={"owner/mobile-app"},
+            )
+            result = pipeline.run_once()
+        finally:
+            os.environ["PATH"] = old_path
+        self.assertEqual(result["outcome"], "succeeded")
+        artifact = result["result"]["artifact"]
+        self.assertEqual(artifact["name"], "app-release.apk")
+        metadata, handle = self.artifacts.open(artifact["id"])
+        with handle:
+            self.assertEqual(handle.read(), b"fixture-apk-bytes")
+        self.assertEqual(metadata["sha256"], artifact["sha256"])
+        self.assertFalse((self.root / "workspaces" / job["id"]).exists())
 
 if __name__ == "__main__":
     unittest.main()
