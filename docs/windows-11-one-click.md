@@ -15,7 +15,7 @@ The default local stack uses Python's standard library and does not require a pi
 1. Download or clone this repository to a folder you control.
 2. Double-click `Setup-DCP-Local.cmd` to run the read-only environment doctor.
 3. Double-click `Start-DCP-Local.cmd`.
-4. In the separate PowerShell window, choose an owner username (1–64 ASCII letters, digits, dot, underscore, @, or hyphen) and a password of at least 6 characters, then confirm the password. This happens only on first launch.
+4. In the separate PowerShell window, choose an owner username (1–64 ASCII letters, digits, dot, underscore, @, or hyphen) and a password of at least 14 characters, then confirm the password. This happens only on first launch.
 5. Open the Dashboard at `http://127.0.0.1:8789/` and sign in with that username and password.
 
 The owner password is stored as a salted PBKDF2-HMAC-SHA256 hash in `%LOCALAPPDATA%\DCP\owner-auth.json`, never as plaintext. The local Auth Proxy issues an HttpOnly, SameSite=Strict session cookie. Session state, the Gateway bearer token, and the trusted-proxy HMAC secret remain in process memory. The browser never receives Gateway credentials.
