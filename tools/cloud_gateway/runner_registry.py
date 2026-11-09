@@ -153,7 +153,9 @@ class RunnerRegistry:
         if "linux" in caps:
             targets.append("build_linux")
         if "macos" in caps:
-            targets.extend(("build_macos", "build_ios"))
+            targets.append("build_macos")
+        if "macos" in caps and "ios" in caps:
+            targets.append("build_ios")
         return sorted(set(targets))
 
     def drain(self, worker_id: str) -> dict:
