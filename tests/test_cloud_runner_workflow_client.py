@@ -15,7 +15,12 @@ class FakeProvider:
 
 class CloudRunnerWorkflowClientTests(unittest.TestCase):
     def setUp(self):
-        self.settings = RunnerSettings("https://gateway.example.test", "test-token")
+        self.settings = RunnerSettings(
+            "https://gateway.example.test",
+            "test-token",
+            provisioning_enabled=True,
+            owner_approved=True,
+        )
         self.repository = "phakphum12345/generated-A4-pdf"
         self.sha = "A" * 40
 
@@ -32,6 +37,39 @@ class CloudRunnerWorkflowClientTests(unittest.TestCase):
                     "ephemeral": True, "max_runtime_minutes": 60, "network_policy": "restricted-egress",
                     "registration_token_handling": "provider-side-only",
                 }])
+
+    def test_provisioning_is_disabled_without_both_explicit_flags(self):
+        request = ProvisionRequest(self.repository, self.sha, 12345)
+        disabled = RunnerSettings("https://gateway.example.test", "test-token")
+        owner_only = RunnerSettings(
+            "https://gateway.example.test", "test-token",
+            provisioning_enabled=True,
+        )
+        enabled_only = RunnerSettings(
+            "https://gateway.example.test", "test-token",
+            owner_approved=True,
+        )
+        for settings in (disabled, owner_only, enabled_only):
+            with self.subTest(settings=settings), patch(
+                "tools.cloud_runner.backend.CloudAPIProvider"
+            ) as factory:
+                with self.assertRaisesRegex(RuntimeError, "disabled|approval"):
+                    request_provisioning(settings, request)
+                factory.assert_not_called()
+
+    def test_settings_from_env_default_to_disabled_and_require_explicit_flags(self):
+        env = {
+            "DCP_RUNNER_PROVIDER_URL": "https://gateway.example.test",
+            "DCP_RUNNER_PROVIDER_TOKEN": "test-token",
+        }
+        settings = RunnerSettings.from_env(env)
+        self.assertFalse(settings.provisioning_enabled)
+        self.assertFalse(settings.owner_approved)
+        env["DCP_CLOUD_RUNNER_PROVISIONING_ENABLED"] = "true"
+        env["DCP_CLOUD_RUNNER_OWNER_APPROVED"] = "true"
+        settings = RunnerSettings.from_env(env)
+        self.assertTrue(settings.provisioning_enabled)
+        self.assertTrue(settings.owner_approved)
 
     def test_unallowlisted_repository_is_rejected_before_provider_creation(self):
         with patch("tools.cloud_runner.backend.CloudAPIProvider") as factory:
