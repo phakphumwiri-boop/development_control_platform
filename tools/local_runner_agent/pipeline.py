@@ -42,7 +42,7 @@ class RunnerPipeline:
 
     def run_once(self) -> dict | None:
         """Claim at most one job. Returns None when the queue is empty."""
-        job = self.client.claim(lease_seconds=120)
+        job = self.client.claim(lease_seconds=300)
         if job is None:
             return None
         job_id = job["id"]
@@ -70,7 +70,7 @@ class RunnerPipeline:
                 now = time.monotonic()
                 if now - last_heartbeat < self.heartbeat_interval_seconds:
                     return False
-                current = self.client.heartbeat(job_id, lease_seconds=120)
+                current = self.client.heartbeat(job_id, lease_seconds=300)
                 last_heartbeat = now
                 return current.get("state") == "cancel_requested"
 
