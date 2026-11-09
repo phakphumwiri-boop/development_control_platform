@@ -195,7 +195,7 @@ class GatewayClient:
         )
         try:
             with build_opener(_NoRedirect).open(
-                request, timeout=self.config.timeout_seconds
+                request, timeout=max(60, self.config.timeout_seconds)
             ) as response:
                 raw = response.read(32769)
                 if len(raw) > 32768:
