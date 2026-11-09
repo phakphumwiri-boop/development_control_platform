@@ -18,38 +18,38 @@ class ResetOwnerPasswordTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_reset_preserves_username_and_backs_up_previous_hash(self):
-        backup = reset_owner_password(self.path, "newpass6", "newpass6")
+        backup = reset_owner_password(self.path, "new-owner-passphrase", "new-owner-passphrase")
         updated = json.loads(self.path.read_text(encoding="utf-8"))
         previous = json.loads(backup.read_text(encoding="utf-8"))
         self.assertEqual(updated["username"], "owner-kept")
-        self.assertTrue(auth.verify_password(updated, "owner-kept", "newpass6"))
+        self.assertTrue(auth.verify_password(updated, "owner-kept", "new-owner-passphrase"))
         self.assertFalse(auth.verify_password(updated, "owner-kept", "previous password 123"))
         self.assertTrue(auth.verify_password(previous, "owner-kept", "previous password 123"))
         self.assertEqual(updated["algorithm"], "pbkdf2_sha256")
         self.assertEqual(updated["rounds"], auth.PBKDF2_ROUNDS)
 
-    def test_rejects_password_shorter_than_six_without_changes(self):
+    def test_rejects_password_shorter_than_fourteen_without_changes(self):
         before = self.path.read_bytes()
-        with self.assertRaisesRegex(ValueError, "at least 6"):
-            reset_owner_password(self.path, "12345", "12345")
+        with self.assertRaisesRegex(ValueError, "at least 14"):
+            reset_owner_password(self.path, "x" * 13, "x" * 13)
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_rejects_mismatch_without_changes(self):
         before = self.path.read_bytes()
         with self.assertRaisesRegex(ValueError, "do not match"):
-            reset_owner_password(self.path, "newpass6", "different")
+            reset_owner_password(self.path, "new-owner-passphrase", "different")
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_refuses_missing_credential_file(self):
         missing = Path(self.temp.name) / "missing.json"
         with self.assertRaises(FileNotFoundError):
-            reset_owner_password(missing, "newpass6", "newpass6")
+            reset_owner_password(missing, "new-owner-passphrase", "new-owner-passphrase")
 
     def test_refuses_invalid_credential_file_without_overwriting(self):
         self.path.write_text("{broken", encoding="utf-8")
         before = self.path.read_bytes()
         with self.assertRaises(ValueError):
-            reset_owner_password(self.path, "newpass6", "newpass6")
+            reset_owner_password(self.path, "new-owner-passphrase", "new-owner-passphrase")
         self.assertEqual(self.path.read_bytes(), before)
 
 
