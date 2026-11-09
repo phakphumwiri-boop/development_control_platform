@@ -307,6 +307,9 @@ def main(argv=None):
             parser.error("DCP_RUNNER_CAPABILITIES must be a non-empty subset of preflight-detected capabilities")
     else:
         caps = sorted(detected)
+    # The registry requires the physical host OS in the capability set. This is
+    # safe because the preflight check above verified that platform toolchain.
+    caps = sorted(set(caps) | {current_host})
 
     client = GatewayClient(base_url, token)
     if args.enroll_only:
