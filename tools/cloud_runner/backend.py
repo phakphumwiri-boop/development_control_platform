@@ -18,6 +18,8 @@ class RunnerSettings:
     bearer_token: str = field(repr=False)
     allowed_repositories: tuple[str, ...] = ("phakphum12345/generated-A4-pdf",)
     timeout_seconds: int = 20
+    provisioning_enabled: bool = False
+    owner_approved: bool = False
 
     def __post_init__(self):
         parsed = urlparse(self.endpoint)
@@ -53,7 +55,16 @@ class RunnerSettings:
         try: timeout = int(values.get("DCP_RUNNER_PROVIDER_TIMEOUT", "20"))
         except (TypeError, ValueError) as exc:
             raise ValueError("DCP_RUNNER_PROVIDER_TIMEOUT must be an integer") from exc
-        return cls(values.get("DCP_RUNNER_PROVIDER_URL", ""), values.get("DCP_RUNNER_PROVIDER_TOKEN", ""), tuple(repos), timeout)
+        enabled = values.get("DCP_CLOUD_RUNNER_PROVISIONING_ENABLED", "false").lower() == "true"
+        approved = values.get("DCP_CLOUD_RUNNER_OWNER_APPROVED", "false").lower() == "true"
+        return cls(
+            values.get("DCP_RUNNER_PROVIDER_URL", ""),
+            values.get("DCP_RUNNER_PROVIDER_TOKEN", ""),
+            tuple(repos),
+            timeout,
+            enabled,
+            approved,
+        )
 
 @dataclass(frozen=True)
 class ProvisionRequest:
@@ -83,6 +94,10 @@ class ProvisionResult:
     detail: str | None
 
 def request_provisioning(settings: RunnerSettings, request: ProvisionRequest) -> ProvisionResult:
+    if not settings.provisioning_enabled:
+        raise RuntimeError("Cloud runner provisioning is disabled")
+    if not settings.owner_approved:
+        raise RuntimeError("Explicit cloud runner owner approval is required")
     request.validate(settings)
     provider = CloudAPIProvider(base_url=settings.endpoint, token=settings.bearer_token, timeout=settings.timeout_seconds)
     manager = RunnerManager(provider, set(settings.allowed_repositories))
