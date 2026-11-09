@@ -61,7 +61,11 @@ class FlutterArtifactPackager:
         if output.is_symlink() or not output.exists():
             raise ArtifactPackageError("expected Flutter build output is missing or unsafe")
         destination_dir = workspace / ".dcp-artifacts"
+        if destination_dir.is_symlink() or (destination_dir.exists() and not destination_dir.is_dir()):
+            raise ArtifactPackageError("artifact staging directory is unsafe")
         destination_dir.mkdir(mode=0o700, exist_ok=True)
+        if destination_dir.resolve(strict=True).parent != workspace.resolve(strict=True):
+            raise ArtifactPackageError("artifact staging directory escaped workspace")
         destination = destination_dir / name
         if destination.exists() or destination.is_symlink():
             raise ArtifactPackageError("artifact destination already exists")
