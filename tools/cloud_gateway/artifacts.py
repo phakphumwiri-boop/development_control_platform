@@ -198,7 +198,18 @@ class ArtifactStore:
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         fd = os.open(path, flags)
-        return metadata, os.fdopen(fd, "rb")
+        handle = os.fdopen(fd, "rb")
+        digest = hashlib.sha256()
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+        if digest.hexdigest() != metadata["sha256"]:
+            handle.close()
+            raise ArtifactError("artifact SHA-256 integrity check failed")
+        handle.seek(0)
+        return metadata, handle
 
     def prune(self, retention_days: int = 30) -> int:
         if isinstance(retention_days, bool) or not isinstance(retention_days, int) or not 1 <= retention_days <= 3650:
