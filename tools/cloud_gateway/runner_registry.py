@@ -68,7 +68,7 @@ class RunnerRegistry:
     def _validate(worker_id: str, host_os: str, capabilities):
         if not isinstance(worker_id, str) or not _WORKER.fullmatch(worker_id):
             raise ValueError("invalid worker ID")
-        if host_os not in _OS:
+        if not isinstance(host_os, str) or host_os not in _OS:
             raise ValueError("host_os must be linux, windows, or macos")
         if not isinstance(capabilities, list) or not 1 <= len(capabilities) <= 7:
             raise ValueError("capabilities must be a non-empty array")
