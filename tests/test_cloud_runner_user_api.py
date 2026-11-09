@@ -627,5 +627,16 @@ class AuthenticatedControlAPITests(unittest.TestCase):
             self.assertEqual(response.headers.get("ETag"), '"' + metadata["sha256"] + '"')
             self.assertIn("app-release.apk", response.headers.get("Content-Disposition", ""))
 
+    def test_dashboard_job_create_fails_closed_on_unverified_commit(self):
+        self.service.repository_authorizer = lambda repository: True
+        self.service.repository_commit_resolver = lambda repository, sha: {"commit_sha": "f" * 40}
+        payload = {"repository": "example/private-app", "commit_sha": "a" * 40, "target": "build"}
+        with self.assertRaises(HTTPError) as error:
+            urlopen(self._dashboard_post("/api/jobs", "nonce_job_bad_commit_0001", payload))
+        try:
+            self.assertEqual(error.exception.code, 403)
+        finally:
+            error.exception.close()
+
 if __name__ == "__main__":
     unittest.main()
