@@ -22,6 +22,7 @@ from .provider_router import ProviderRouter
 from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
 from .job_control import JobConflict, JobNotFound, JobStore
+from .artifacts import ArtifactError, ArtifactStore
 
 
 class DisabledProvider:
@@ -159,6 +160,9 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
         def job_store(self):
             return getattr(service, "job_store", None)
 
+        def artifact_store(self):
+            return getattr(service, "artifact_store", None)
+
         @staticmethod
         def public_job(row):
             keys = ("id", "repository", "commit_sha", "target", "state",
@@ -225,6 +229,11 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     if len(parts) == 1:
                         row = jobs.get(parts[0])
                         return self.send_json(200, self.public_job(row)) if row else self.send_json(404, {"error": "not found"})
+                    if len(parts) == 2 and parts[1] == "artifacts":
+                        artifacts = self.artifact_store()
+                        if artifacts is None:
+                            return self.send_json(503, {"error": "artifact storage unavailable"})
+                        return self.send_json(200, {"artifacts": artifacts.list_for_job(parts[0])})
                     if len(parts) == 2 and parts[1] == "events":
                         return self.send_json(200, {"events": jobs.events(parts[0])})
                     if len(parts) == 2 and parts[1] == "logs":
@@ -237,6 +246,36 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 except ValueError:
                     return self.send_json(400, {"error": "invalid pagination"})
                 return self.send_json(404, {"error": "not found"})
+            if path.startswith("/api/artifacts/") and path.endswith("/download"):
+                identity = self.proxy_identity()
+                if not identity or identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                artifact_id = path[len("/api/artifacts/"):-len("/download")].strip("/")
+                artifacts = self.artifact_store()
+                if artifacts is None:
+                    return self.send_json(503, {"error": "artifact storage unavailable"})
+                try:
+                    metadata, handle = artifacts.open(artifact_id)
+                except ArtifactError:
+                    return self.send_json(404, {"error": "artifact not found"})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(metadata["size"]))
+                self.send_header("Content-Disposition", "attachment; filename=" + metadata["name"])
+                self.send_header("ETag", chr(34) + metadata["sha256"] + chr(34))
+                self.send_header("Cache-Control", "private, no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                try:
+                    with handle:
+                        while True:
+                            chunk = handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             if path.startswith("/api/"):
                 identity = self.proxy_identity()
                 if not identity:
@@ -470,6 +509,27 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
                         return self.send_json(404, {"error": "not found"})
                     job_id, action = parts
+                    if action == "artifacts":
+                        artifacts = self.artifact_store()
+                        if artifacts is None:
+                            return self.send_json(503, {"error": "artifact storage unavailable"})
+                        try:
+                            size = int(self.headers.get("Content-Length", "0"))
+                        except ValueError:
+                            return self.send_json(400, {"error": "invalid Content-Length"})
+                        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/octet-stream":
+                            return self.send_json(415, {"error": "application/octet-stream required"})
+                        if not 1 <= size <= artifacts.max_artifact_bytes:
+                            return self.send_json(413, {"error": "artifact size is outside allowed bounds"})
+                        try:
+                            metadata = artifacts.store(
+                                jobs, job_id, worker,
+                                self.headers.get("X-DCP-Artifact-Name", ""),
+                                self.rfile, size,
+                            )
+                            return self.send_json(201, {"artifact": metadata})
+                        except ArtifactError as exc:
+                            return self.send_json(409, {"error": str(exc)})
                     payload = self.body()
                     if action == "heartbeat":
                         row = jobs.heartbeat(job_id, worker, payload.get("lease_seconds", 30))
@@ -675,6 +735,12 @@ def main():
         repository_project_inspector=github_app.inspect_repository_project if github_app else None,
     )
     service.job_store = jobs_store
+    artifact_root = os.getenv("DCP_GATEWAY_ARTIFACTS_ROOT", database_path + ".artifacts")
+    try:
+        artifact_limit = int(os.getenv("DCP_GATEWAY_MAX_ARTIFACT_BYTES", str(100 * 1024 * 1024)))
+        service.artifact_store = ArtifactStore(artifact_root, artifact_limit)
+    except (ValueError, ArtifactError) as exc:
+        raise SystemExit("DCP artifact storage configuration is invalid") from exc
     _start_expiry_reconciler(service, int(os.getenv("DCP_GATEWAY_RECONCILE_SECONDS", "30")))
     server = ThreadingHTTPServer(
         (host, port), make_handler(service, settings.api_token, proxy_secret, public_origin, runner_tokens)
