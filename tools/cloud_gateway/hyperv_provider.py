@@ -51,7 +51,7 @@ class HyperVProvider:
         env.update({
             "DCP_VM_ID": str(spec["id"]),
             "DCP_VM_NAME": str(spec["name"]),
-            "DCP_VM_IMAGE": str(spec["image_path"]),
+            "DCP_VM_IMAGE": str(spec.get("image_path", "")),
             "DCP_VM_DISK": str(self.storage_root / str(spec["id"]) / "disk.vhdx"),
             "DCP_VM_SWITCH": self.switch_name,
             "DCP_VM_CPU": str(spec["cpu"]),
