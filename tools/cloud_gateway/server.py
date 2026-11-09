@@ -636,6 +636,7 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     if registry is None:
                         return self.send_json(503, {"error": "local Runner registry unavailable"})
                     try:
+                        self.body()
                         if parts[1] == "drain":
                             row = registry.drain(worker_id)
                         elif parts[1] == "enable":
