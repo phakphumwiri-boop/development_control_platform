@@ -303,6 +303,7 @@ def make_handler(app: LocalAuthProxy, dashboard_dir: Path):
                     app.failures[ip] = attempts
                     return self.send_json(401, {"error": "invalid username or password"})
                 with app.lock:
+                    app.failures.pop(ip, None)
                     app.sessions.pop(session["id"], None)
                 sid, new_session = app.new_session(True)
                 cookie = f"{COOKIE}={sid}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL}"
