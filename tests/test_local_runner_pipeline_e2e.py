@@ -93,6 +93,7 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
             )
             pipeline = RunnerPipeline(
                 self.client, self.manager, _FixtureCheckout(self.manager), executor,
+                trusted_repositories={"owner/mobile-app"},
             )
             result = pipeline.run_once()
         finally:
@@ -120,7 +121,8 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
                 self.manager, enabled=True, timeout_seconds=10,
             )
             checkout = _FixtureCheckout(self.manager, cancel_job=lambda job_id: self.jobs.cancel(job_id))
-            pipeline = RunnerPipeline(self.client, self.manager, checkout, executor)
+            pipeline = RunnerPipeline(self.client, self.manager, checkout, executor,
+                                      trusted_repositories={"owner/mobile-app"})
             result = pipeline.run_once()
         finally:
             os.environ["PATH"] = old_path
