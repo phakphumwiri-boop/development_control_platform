@@ -51,6 +51,23 @@ class RunnerAgentTests(unittest.TestCase):
                    "00000000-0000-4000-8000-000000000001")
         client.log.assert_called()
 
+    def test_cancellation_after_last_command_prevents_success(self):
+        from unittest.mock import patch
+        client = Mock()
+        client.heartbeat.return_value = {"state": "cancel_requested"}
+        agent = RunnerAgent(client, "runner-1", ["flutter"])
+        commit = "a" * 40
+        with patch("tools.runner_agent.agent.subprocess.check_output", return_value=commit), \
+             patch.object(agent, "_run"):
+            with self.assertRaises(JobCancelled):
+                agent.execute({
+                    "id": "00000000-0000-4000-8000-000000000001",
+                    "target": "test", "repository": "owner/repo",
+                    "commit_sha": commit,
+                })
+        client.finish.assert_not_called()
+        client.upload.assert_not_called()
+
     def test_gateway_client_requires_token(self):
         client = GatewayClient("http://127.0.0.1:8000", "secret")
         self.assertEqual(client.base_url, "http://127.0.0.1:8000")
