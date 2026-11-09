@@ -66,7 +66,7 @@ class InfrastructureApiTests(unittest.TestCase):
     def headers(self, method, path, role="owner", csrf=False):
         timestamp = str(int(time.time()))
         nonce = secrets.token_urlsafe(24)
-        canonical = "\\n".join((method, path, self.subject, role,
+        canonical = "\n".join((method, path, self.subject, role,
                                   self.session, timestamp, nonce)).encode()
         signature = hmac.new(self.secret.encode(), canonical, hashlib.sha256).hexdigest()
         result = {
@@ -78,7 +78,7 @@ class InfrastructureApiTests(unittest.TestCase):
             result["Origin"] = self.origin
             result["X-CSRF-Token"] = hmac.new(
                 self.secret.encode(),
-                ("csrf\\n" + self.subject + "\\n" + self.session).encode(),
+                ("csrf\n" + self.subject + "\n" + self.session).encode(),
                 hashlib.sha256,
             ).hexdigest()
         return result
