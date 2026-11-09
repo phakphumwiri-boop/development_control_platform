@@ -254,6 +254,14 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 except ValueError:
                     return self.send_json(400, {"error": "invalid pagination"})
                 return self.send_json(404, {"error": "not found"})
+            if path == "/api/runners":
+                identity = self.proxy_identity()
+                if not identity or identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                registry = self.runner_registry()
+                if registry is None:
+                    return self.send_json(503, {"error": "local Runner registry unavailable"})
+                return self.send_json(200, {"runners": registry.list_workers()})
             if path.startswith("/api/artifacts/") and path.endswith("/download"):
                 identity = self.proxy_identity()
                 if not identity or identity.get("role") not in ("owner", "operator"):
@@ -528,11 +536,39 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 if jobs is None:
                     return self.send_json(503, {"error": "job control plane unavailable"})
                 try:
+                    if path == "/v1/runner/register":
+                        registry = self.runner_registry()
+                        if registry is None:
+                            return self.send_json(503, {"error": "local Runner registry unavailable"})
+                        payload = self.body()
+                        try:
+                            row = registry.register(worker, payload.get("host_os"), payload.get("capabilities"))
+                            return self.send_json(200, {"runner": row})
+                        except ValueError as exc:
+                            return self.send_json(400, {"error": str(exc)})
+                    if path == "/v1/runner/ping":
+                        registry = self.runner_registry()
+                        if registry is None:
+                            return self.send_json(503, {"error": "local Runner registry unavailable"})
+                        self.body()
+                        try:
+                            return self.send_json(200, {"runner": registry.heartbeat(worker)})
+                        except WorkerNotFound:
+                            return self.send_json(409, {"error": "Runner must register before heartbeat"})
                     if path == "/v1/runner/claim":
                         payload = self.body()
                         lease = payload.get("lease_seconds", 30)
                         jobs.recover_expired_leases()
-                        row = jobs.claim(worker, lease)
+                        registry = self.runner_registry()
+                        if registry is not None:
+                            runner = registry.get(worker)
+                            if runner is None:
+                                return self.send_json(409, {"error": "Runner must register before claiming jobs"})
+                            if runner.get("state") != "online":
+                                return self.send_json(409, {"error": "Runner is offline or draining"})
+                            row = jobs.claim(worker, lease, registry.allowed_targets(worker))
+                        else:
+                            row = jobs.claim(worker, lease)
                         return self.send_json(200, {"job": self.public_job(row) if row else None})
                     parts = path[len("/v1/runner/"):].split("/")
                     if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
@@ -591,6 +627,23 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(403, {"error": "CSRF validation failed"})
                 if identity.get("role") != "owner":
                     return self.send_json(403, {"error": "owner role required"})
+                if path.startswith("/api/runners/"):
+                    parts = path[len("/api/runners/"):].split("/")
+                    if len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", parts[0]):
+                        return self.send_json(404, {"error": "not found"})
+                    registry = self.runner_registry()
+                    if registry is None:
+                        return self.send_json(503, {"error": "local Runner registry unavailable"})
+                    try:
+                        if parts[1] == "drain":
+                            row = registry.drain(parts[0])
+                        elif parts[1] == "enable":
+                            row = registry.enable(parts[0])
+                        else:
+                            return self.send_json(404, {"error": "not found"})
+                        return self.send_json(200, {"runner": row})
+                    except WorkerNotFound:
+                        return self.send_json(404, {"error": "Runner not found"})
                 if path != "/api/cloud-runners":
                     return self.send_json(404, {"error": "not found"})
                 try:
