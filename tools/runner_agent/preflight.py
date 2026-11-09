@@ -48,7 +48,11 @@ def _android_sdk_root() -> Path | None:
         elif platform.system().lower() == "darwin":
             candidates.append(Path.home() / "Library" / "Android" / "sdk")
         else:
-            candidates.append(Path.home() / "Android" / "Sdk")
+            try:
+                candidates.append(Path.home() / "Android" / "Sdk")
+            except RuntimeError:
+                # Minimal/container environments may not define a home directory.
+                pass
     return next((candidate for candidate in candidates if candidate.is_dir()), None)
 
 
