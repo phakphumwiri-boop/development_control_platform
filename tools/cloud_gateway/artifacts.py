@@ -7,6 +7,7 @@ import re
 import sqlite3
 import stat
 import threading
+from contextlib import contextmanager
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -60,10 +61,14 @@ class ArtifactStore:
         except OSError:
             pass
 
+    @contextmanager
     def _db(self):
         conn = sqlite3.connect(self.database, timeout=10)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     @staticmethod
     def _validate_identity(job_id: str, worker_id: str, name: str, size: int):
