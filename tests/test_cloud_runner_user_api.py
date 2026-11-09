@@ -19,6 +19,7 @@ from tools.cloud_gateway.service import GatewayService
 from tools.cloud_gateway.store import RunnerStore
 from tools.cloud_gateway.job_control import JobStore
 from tools.cloud_gateway.artifacts import ArtifactStore
+from tools.cloud_gateway.runner_registry import RunnerRegistry
 from tools.local_runner_agent.client import GatewayClient, RunnerAgentConfig
 
 SECRET = "test-proxy-secret-that-is-at-least-32-bytes-long"
@@ -46,6 +47,8 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         self.job_store = JobStore(str(Path(self.temp.name) / "jobs.sqlite"))
         self.service.job_store = self.job_store
         self.service.artifact_store = ArtifactStore(Path(self.temp.name) / "artifacts")
+        self.registry = RunnerRegistry(Path(self.temp.name) / "runners.sqlite3")
+        self.service.runner_registry = self.registry
         self.runner_token = "runner-token-for-test-that-is-at-least-32-bytes"
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
@@ -395,6 +398,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
             {"repository": "example/private-app", "commit_sha": "c" * 40, "target": "test"},
             "runner-job-key-0001",
         )
+        self.registry.register("worker-test-01", "linux", ["flutter", "linux"])
         def runner_request(path, body):
             data = json.dumps(body).encode()
             return Request(self.base + path, data=data, method="POST", headers={
@@ -453,6 +457,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         ))
         health = agent.health()
         self.assertEqual(health["status"], "ok")
+        agent.register("linux", ["flutter", "linux"])
         claimed = agent.claim(lease_seconds=60)
         self.assertEqual(claimed["id"], job["id"])
         self.assertEqual(claimed["worker"], "worker-test-01")
@@ -613,6 +618,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
             worker_id="worker-test-01",
             token=self.runner_token,
         ))
+        client.register("linux", ["flutter", "linux"])
         metadata = client.upload_artifact(job["id"], str(artifact_file))
         self.assertEqual(metadata["sha256"], hashlib.sha256(payload).hexdigest())
 
