@@ -544,7 +544,7 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                         try:
                             row = registry.register(worker, payload.get("host_os"), payload.get("capabilities"))
                             return self.send_json(200, {"runner": row})
-                        except ValueError as exc:
+                        except (ValueError, TypeError) as exc:
                             return self.send_json(400, {"error": str(exc)})
                     if path == "/v1/runner/ping":
                         registry = self.runner_registry()
