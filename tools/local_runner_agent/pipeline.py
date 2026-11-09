@@ -26,6 +26,7 @@ class RunnerPipeline:
         executor: FlutterBuildExecutor,
         *,
         heartbeat_interval_seconds: int = 10,
+        trusted_repositories: set[str] | frozenset[str] = frozenset(),
     ):
         if isinstance(heartbeat_interval_seconds, bool) or not isinstance(heartbeat_interval_seconds, int) or not 5 <= heartbeat_interval_seconds <= 60:
             raise ValueError("heartbeat interval must be between 5 and 60 seconds")
@@ -34,6 +35,7 @@ class RunnerPipeline:
         self.checkout_provider = checkout
         self.executor = executor
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
+        self.trusted_repositories = frozenset(trusted_repositories)
 
     def run_once(self) -> dict | None:
         """Claim at most one job. Returns None when the queue is empty."""
@@ -48,6 +50,8 @@ class RunnerPipeline:
         result = {}
         last_heartbeat = 0.0
         try:
+            if job["repository"] not in self.trusted_repositories:
+                raise ExecutionError("repository is not in the Runner trusted-repository allowlist")
             self.workspaces.create(job_id, worker_id)
             allocated = True
             self.client.append_log(job_id, "Runner claimed job; workspace allocated", "system")
@@ -67,6 +71,7 @@ class RunnerPipeline:
                 last_heartbeat = now
                 return current.get("state") == "cancel_requested"
 
+            self.executor.log = lambda stream, message: self.client.append_log(job_id, message, stream)
             build = self.executor.run(
                 job_id, worker_id, job["target"],
                 cancel_requested=cancellation_requested,
