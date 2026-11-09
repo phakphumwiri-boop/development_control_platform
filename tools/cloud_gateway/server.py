@@ -735,7 +735,7 @@ def main():
         repository_project_inspector=github_app.inspect_repository_project if github_app else None,
     )
     service.job_store = jobs_store
-    artifact_root = os.getenv("DCP_GATEWAY_ARTIFACTS_ROOT", database_path + ".artifacts")
+    artifact_root = os.getenv("DCP_GATEWAY_ARTIFACTS_ROOT") or os.path.abspath(database_path + ".artifacts")
     try:
         artifact_limit = int(os.getenv("DCP_GATEWAY_MAX_ARTIFACT_BYTES", str(100 * 1024 * 1024)))
         service.artifact_store = ArtifactStore(artifact_root, artifact_limit)
