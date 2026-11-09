@@ -14,6 +14,8 @@ class OrkaTests(unittest.TestCase):
  def make(self,checker=None): return OrkaProvider("https://orka.example.test","dcp","macos15-arm64",SecretReader(),runner_online_checker=checker)
  def test_rejects_non_https_or_untrusted_configuration(self):
   with self.assertRaises(ValueError): OrkaProvider("http://orka.example.test","dcp","macos",SecretReader())
+  with self.assertRaises(ValueError): OrkaProvider("https://@orka.example.test","dcp","macos",SecretReader())
+  with self.assertRaises(ValueError): OrkaProvider("https://:pass@orka.example.test","dcp","macos",SecretReader())
   with self.assertRaises(ValueError): OrkaProvider("https://orka.example.test","../admin","macos",SecretReader())
  def test_provision_posts_pinned_vm_config_and_nonsecret_metadata(self):
   provider=self.make()
