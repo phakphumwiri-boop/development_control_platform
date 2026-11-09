@@ -901,7 +901,7 @@ async function localRunnerControl(workerId,action){
  try{
   await buildJobsSession();
   const data=await runnerJson("./api/runners/"+encodeURIComponent(workerId)+"/"+action,{
-   method:"POST",headers:{"X-CSRF-Token":runnerUI.csrf}
+   method:"POST",headers:{"X-CSRF-Token":runnerUI.csrf,"Content-Type":"application/json"},body:"{}"
   });
   runnerText("build-job-result","Local Runner "+workerId+" is now "+data.runner.state+".");
   await localRunnerRefresh();
