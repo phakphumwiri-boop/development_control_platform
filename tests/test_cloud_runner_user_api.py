@@ -355,6 +355,8 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         return self.request("POST", path, nonce, headers, body, role=role)
 
     def test_dashboard_job_api_create_list_get_cancel_and_role_guards(self):
+        self.service.repository_authorizer = lambda repository: repository == "example/private-app"
+        self.service.repository_commit_resolver = lambda repository, sha: {"commit_sha": sha}
         payload = {"repository": "example/private-app", "commit_sha": "a" * 40, "target": "test"}
         with urlopen(self._dashboard_post("/api/jobs", "nonce_job_create_0001", payload)) as response:
             created = json.loads(response.read())
