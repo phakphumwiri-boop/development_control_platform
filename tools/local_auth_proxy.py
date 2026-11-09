@@ -25,6 +25,7 @@ PORT = int(os.getenv("DCP_LOCAL_PORT", "8789"))
 GATEWAY_PORT = int(os.getenv("DCP_GATEWAY_PORT", "18790"))
 SESSION_TTL = 12 * 60 * 60
 PBKDF2_ROUNDS = 600_000
+MIN_PASSWORD_LENGTH = 14
 COOKIE = "DCP_LOCAL_SESSION"
 MAX_BODY = 32_768
 ALLOWED_GET = ("/api/cloud-runners/status", "/api/cloud-runners")
@@ -74,9 +75,9 @@ def load_or_create_credentials(path: Path = CREDENTIALS) -> dict:
     )):
         raise SystemExit("Username must be 1..64 ASCII letters, digits, dot, underscore, @, or hyphen.")
     while True:
-        password = getpass.getpass("Choose owner password (minimum 6 characters): ")
-        if len(password) < 6:
-            print("Password must contain at least 6 characters.", flush=True)
+        password = getpass.getpass("Choose owner password (minimum 14 characters): ")
+        if len(password) < MIN_PASSWORD_LENGTH:
+            print(f"Password must contain at least {MIN_PASSWORD_LENGTH} characters.", flush=True)
             continue
         confirmation = getpass.getpass("Confirm owner password: ")
         if not hmac.compare_digest(password, confirmation):
