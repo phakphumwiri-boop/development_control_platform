@@ -78,6 +78,8 @@ class RunnerRegistry:
             raise ValueError("capabilities must be unique and include flutter")
         if host_os not in capabilities:
             raise ValueError("capabilities must include the Runner host OS")
+        if any(item in capabilities and item != host_os for item in _OS):
+            raise ValueError("Runner cannot claim another host operating system capability")
 
     def _decode(self, row):
         if row is None:
