@@ -119,7 +119,7 @@ class ArtifactStore:
                     chunk = source.read(min(1024 * 1024, remaining))
                     if not chunk:
                         raise ArtifactError("artifact upload ended before Content-Length")
-                    if not isinstance(chunk, bytes):
+                    if not isinstance(chunk, bytes) or len(chunk) > remaining:
                         raise ArtifactError("artifact upload stream returned invalid data")
                     output.write(chunk)
                     digest.update(chunk)
