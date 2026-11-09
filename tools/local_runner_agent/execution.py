@@ -10,6 +10,7 @@ import queue
 import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -36,6 +37,7 @@ class BuildResult:
 _COMMANDS = {
     "test": ("test", "--no-pub"),
     "build": ("build", "apk", "--release", "--no-pub"),
+    "build_android": ("build", "apk", "--release", "--no-pub"),
     "package": ("build", "appbundle", "--release", "--no-pub"),
     "build_web": ("build", "web", "--release", "--no-pub"),
     "build_windows": ("build", "windows", "--release", "--no-pub"),
@@ -120,7 +122,14 @@ class FlutterBuildExecutor:
             raise ExecutionError("build execution is disabled by runner policy")
         command = self.command_for(target)
         workspace = self.workspaces.get(job_id, worker_id)
-        if not (workspace / "pubspec.yaml").is_file():
+        project_root = workspace / "source" if (workspace / "source").is_dir() else workspace
+        if target in ("build_macos", "build_ios") and sys.platform != "darwin":
+            raise ExecutionError("macOS and iOS builds require a macOS Runner host")
+        if target == "build_windows" and sys.platform != "win32":
+            raise ExecutionError("Windows builds require a Windows Runner host")
+        if target == "build_linux" and not sys.platform.startswith("linux"):
+            raise ExecutionError("Linux builds require a Linux Runner host")
+        if not (project_root / "pubspec.yaml").is_file():
             raise ExecutionError("Flutter project manifest is missing")
         if shutil.which(self.flutter_executable) is None:
             raise ExecutionError("Flutter SDK executable is not available on PATH")
@@ -128,19 +137,20 @@ class FlutterBuildExecutor:
 
         env = {
             "PATH": os.environ.get("PATH", ""),
-            "HOME": str(workspace),
-            "USERPROFILE": str(workspace),
+            "HOME": str(workspace / ".runner-home"),
+            "USERPROFILE": str(workspace / ".runner-home"),
             "PUB_CACHE": str(workspace / ".pub-cache"),
             "CI": "true",
             "FLUTTER_SUPPRESS_ANALYTICS": "true",
             "GIT_TERMINAL_PROMPT": "0",
             "LANG": "C.UTF-8",
         }
+        Path(env["HOME"]).mkdir(mode=0o700, exist_ok=True)
         Path(env["PUB_CACHE"]).mkdir(mode=0o700, exist_ok=True)
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         started = time.monotonic()
         process = subprocess.Popen(
-            list(command), cwd=str(workspace), env=env,
+            list(command), cwd=str(project_root), env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             shell=False, close_fds=True, start_new_session=(os.name != "nt"),
             creationflags=creationflags,
