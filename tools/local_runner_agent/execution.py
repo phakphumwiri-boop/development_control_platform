@@ -159,7 +159,7 @@ class FlutterBuildExecutor:
         def pump(pipe, stream):
             try:
                 while True:
-                    chunk = pipe.read(4096)
+                    chunk = pipe.read1(4096) if hasattr(pipe, "read1") else pipe.read(4096)
                     if not chunk:
                         break
                     messages.put((stream, chunk))
