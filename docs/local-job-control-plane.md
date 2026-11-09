@@ -106,6 +106,7 @@ $env:DCP_RUNNER_TOKEN = "<dedicated-runner-token>"
 $env:DCP_RUNNER_EXECUTION_ENABLED = "1"
 $env:DCP_RUNNER_WORKSPACE_ROOT = "D:\\DCP\\workspaces"
 $env:DCP_RUNNER_TRUSTED_REPOSITORIES = '["owner/repository"]'
+$env:DCP_RUNNER_CAPABILITIES = '["flutter","windows","android","web"]'
 python -m tools.local_runner_agent --once
 ```
 
@@ -127,7 +128,7 @@ The command processes no more than one queued job. The host must have the Flutte
 
 ## M8 — Local Runner Fleet Registry
 
-- The Gateway keeps a persistent inventory of local Runner workers, host OS, declared capabilities, registration time, last-seen time, and state (`online`, `draining`, `offline`).
+- The Gateway keeps a persistent inventory of local Runner workers, host OS, declared capabilities, registration time, last-seen time, and state (`online`, `draining`, `offline`). Configure its database with `DCP_GATEWAY_RUNNERS_DATABASE` (default `<DCP_GATEWAY_DATABASE>.runners`) and stale timeout with `DCP_GATEWAY_RUNNER_STALE_SECONDS`.
 - Worker identity is derived from its dedicated Runner token; the client never supplies its own worker ID in registration or heartbeat payloads.
 - A Runner must register before claiming work. Job claims are filtered by the Runner's registered capabilities: Flutter test, Android, Web, Windows, Linux, macOS, and iOS.
 - Unsupported platform jobs remain queued for a compatible worker instead of being claimed and failing on the wrong OS.
