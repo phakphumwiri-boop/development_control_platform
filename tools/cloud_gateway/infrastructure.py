@@ -256,6 +256,7 @@ class InfrastructureManager:
         self.providers = dict(providers)
         self.default_provider = default_provider
         self.provisioning_enabled = provisioning_enabled
+        self.create_lock = threading.Lock()
         self.images = {
             "dcp-linux-ubuntu-24.04": {"id": "dcp-linux-ubuntu-24.04",
                 "target_os": "linux", "version": "24.04", "architecture": "x64",
@@ -285,6 +286,15 @@ class InfrastructureManager:
 
     def create(self, *, target_os: str, image_id: str, template_id: str,
                idempotency_key: str, provider_id: str | None = None):
+        # Serialize idempotency reservation with provider creation to avoid orphaned
+        # provider resources when concurrent requests reuse the same key.
+        with self.create_lock:
+            return self._create(target_os=target_os, image_id=image_id,
+                                template_id=template_id, idempotency_key=idempotency_key,
+                                provider_id=provider_id)
+
+    def _create(self, *, target_os: str, image_id: str, template_id: str,
+                idempotency_key: str, provider_id: str | None = None):
         if not isinstance(idempotency_key, str) or not 8 <= len(idempotency_key) <= 200:
             raise ValueError("Idempotency key must be 8..200 characters")
         if not isinstance(target_os, str) or target_os not in _OS:
@@ -301,16 +311,16 @@ class InfrastructureManager:
             raise ProviderUnavailable("Selected provider is not configured")
         existing = self.store.by_key(idempotency_key)
         if existing:
-            if (existing["target_os"], existing["image_id"], existing["template_id"]) != (
-                target_os, image_id, template_id
+            if (existing["provider_id"], existing["target_os"], existing["image_id"], existing["template_id"]) != (
+                provider_name, target_os, image_id, template_id
             ):
                 raise LifecycleConflict("Idempotency key conflicts with another request")
             return existing, False
+        if provider_name != "fake" and not self.provisioning_enabled:
+            raise ProviderUnavailable("External provisioning is disabled")
         readiness = provider.readiness(image, template)
         if not isinstance(readiness, dict) or readiness.get("ready") is not True:
             raise ProviderUnavailable("Selected provider is not ready")
-        if provider_name != "fake" and not self.provisioning_enabled:
-            raise ProviderUnavailable("External provisioning is disabled")
         result = provider.create({"target_os": target_os, "image_id": image_id,
                                   "template_id": template_id})
         if result.get("state") not in _STATES or result.get("provider_resource_id") is None:
