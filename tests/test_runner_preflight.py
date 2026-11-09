@@ -1,5 +1,7 @@
 """Read-only Runner host preflight tests; never contact a Gateway."""
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.runner_agent import preflight
@@ -62,6 +64,39 @@ class RunnerPreflightTests(unittest.TestCase):
         self.assertEqual(report["version"], "Flutter 3.44.4")
         self.assertEqual(run.call_args.kwargs["encoding"], "utf-8")
         self.assertEqual(run.call_args.kwargs["errors"], "replace")
+
+    @patch("tools.runner_agent.preflight.platform.system", return_value="Windows")
+    @patch("tools.runner_agent.preflight._visual_studio", return_value={"installed": False, "version": None})
+    @patch("tools.runner_agent.preflight.shutil.which")
+    @patch("tools.runner_agent.preflight.subprocess.run")
+    def test_android_sdk_and_adb_are_discovered_from_default_windows_sdk_path(self, run, which, _vs, _system):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sdk = Path(temp_dir) / "Android" / "Sdk"
+            adb = sdk / "platform-tools" / "adb.exe"
+            adb.parent.mkdir(parents=True)
+            adb.write_text("", encoding="utf-8")
+            which.side_effect = lambda name: f"C:/{name}.exe" if name in {"git", "flutter", "java"} else None
+            run.return_value.stdout = "Android Debug Bridge version 1.0.41"
+            run.return_value.stderr = ""
+            with patch.dict("os.environ", {"LOCALAPPDATA": temp_dir}, clear=True):
+                report = preflight.collect_preflight()
+        self.assertTrue(report["tools"]["android_sdk"]["installed"])
+        self.assertTrue(report["tools"]["adb"]["installed"])
+        self.assertIn("android", report["detected_capabilities"])
+
+    @patch("tools.runner_agent.preflight.platform.system", return_value="Windows")
+    @patch("tools.runner_agent.preflight._visual_studio", return_value={"installed": False, "version": None})
+    @patch("tools.runner_agent.preflight.shutil.which")
+    def test_android_sdk_without_adb_is_not_reported_as_android_ready(self, which, _vs, _system):
+        which.side_effect = lambda name: f"C:/{name}.exe" if name in {"git", "flutter", "java"} else None
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sdk = Path(temp_dir) / "Android" / "Sdk"
+            sdk.mkdir(parents=True)
+            with patch.dict("os.environ", {"LOCALAPPDATA": temp_dir}, clear=True):
+                report = preflight.collect_preflight()
+        self.assertTrue(report["tools"]["android_sdk"]["installed"])
+        self.assertFalse(report["tools"]["adb"]["installed"])
+        self.assertNotIn("android", report["detected_capabilities"])
 
 
 if __name__ == "__main__":
