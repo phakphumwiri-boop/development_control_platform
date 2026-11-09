@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -81,9 +82,21 @@ def main(argv=None) -> int:
                 "DCP_RUNNER_MAX_OUTPUT_BYTES", 5 * 1024 * 1024
             ),
         )
+        host_os = platform.system().lower()
+        if host_os == "darwin":
+            host_os = "macos"
+        if host_os not in ("linux", "windows", "macos"):
+            raise ValueError("unsupported Runner host operating system")
+        raw_capabilities = json.loads(
+            os.environ.get("DCP_RUNNER_CAPABILITIES", json.dumps(["flutter", host_os]))
+        )
+        if not isinstance(raw_capabilities, list):
+            raise ValueError("DCP_RUNNER_CAPABILITIES must be a JSON string array")
         pipeline = RunnerPipeline(
             client, manager, checkout, executor,
             trusted_repositories=frozenset(raw_repositories),
+            worker_os=host_os,
+            capabilities=frozenset(raw_capabilities),
         )
         result = pipeline.run_once()
         if result is None:
