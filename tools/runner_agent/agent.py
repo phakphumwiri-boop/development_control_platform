@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
+import threading
 import os
 import platform
 import shutil
@@ -147,8 +149,6 @@ class RunnerAgent:
     def execute(self, job):
         job_id = job["id"]
         target = job["target"]
-        if target not in build_command.__annotations__ and False:
-            raise ValueError("invalid target")
         if target not in self.client_targets:
             raise ValueError("unsupported target")
         required_os = {
@@ -195,36 +195,53 @@ class RunnerAgent:
         self.client.log(job_id, "Executing: " + " ".join(command), "system")
         process = subprocess.Popen(
             command, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, errors="replace", shell=False,
+            text=True, errors="replace", shell=False, bufsize=1,
         )
+        output_queue = queue.Queue()
+        def collect_output():
+            try:
+                for output_line in process.stdout:
+                    output_queue.put(output_line)
+            finally:
+                output_queue.put(None)
+        reader = threading.Thread(target=collect_output, daemon=True)
+        reader.start()
         deadline = time.monotonic() + self.command_timeout
+        last_heartbeat = time.monotonic()
         lines = []
+        buffered_chars = 0
+        stream_closed = False
         try:
-            while process.poll() is None:
+            while process.poll() is None or not stream_closed:
                 if time.monotonic() >= deadline:
                     process.kill()
                     raise TimeoutError("Runner command exceeded configured timeout")
-                line = process.stdout.readline() if process.stdout else ""
-                if line:
-                    lines.append(line)
-                    if sum(map(len, lines)) > 7500:
-                        self.client.log(job_id, "".join(lines)[-7500:])
-                        lines.clear()
-                else:
-                    time.sleep(0.25)
-                self.client.heartbeat(job_id, self.lease_seconds)
-            if process.stdout:
-                tail = process.stdout.read()
-                if tail:
-                    lines.append(tail)
+                try:
+                    line = output_queue.get(timeout=1)
+                    if line is None:
+                        stream_closed = True
+                    else:
+                        lines.append(line)
+                        buffered_chars += len(line)
+                        if buffered_chars >= 7000:
+                            self.client.log(job_id, "".join(lines)[-7500:])
+                            lines.clear()
+                            buffered_chars = 0
+                except queue.Empty:
+                    pass
+                if time.monotonic() - last_heartbeat >= max(5, self.lease_seconds // 3):
+                    self.client.heartbeat(job_id, self.lease_seconds)
+                    last_heartbeat = time.monotonic()
             if lines:
                 self.client.log(job_id, "".join(lines)[-7500:])
+            reader.join(timeout=2)
             if process.returncode:
                 raise RuntimeError("Command failed with exit code %s: %s" % (process.returncode, command[0]))
         finally:
             if process.poll() is None:
                 process.kill()
                 process.wait()
+            reader.join(timeout=2)
 
 
 def main(argv=None):
