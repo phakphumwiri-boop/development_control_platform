@@ -131,6 +131,8 @@ class WorkspaceManager:
                 if item.is_symlink():
                     raise WorkspaceError("workspace contains a symlink")
             for name in files:
+                if current == str(target) and name == _MARKER:
+                    continue
                 item = Path(current) / name
                 info = item.lstat()
                 if not stat.S_ISREG(info.st_mode):
