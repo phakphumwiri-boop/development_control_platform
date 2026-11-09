@@ -70,12 +70,13 @@ class RunnerAgentTests(unittest.TestCase):
 
     @patch("tools.runner_agent.agent.collect_preflight")
     @patch("tools.runner_agent.agent.GatewayClient")
+    @patch("tools.runner_agent.agent.host_os", return_value="windows")
     @patch.dict("os.environ", {
         "DCP_GATEWAY_URL": "http://127.0.0.1:8789",
         "DCP_RUNNER_ID": "windows-enroll-test",
         "DCP_RUNNER_TOKEN": "x" * 40,
     }, clear=True)
-    def test_enroll_only_does_not_require_execution_or_claim_jobs(self, client_type, preflight):
+    def test_enroll_only_does_not_require_execution_or_claim_jobs(self, _host, client_type, preflight):
         from tools.runner_agent.agent import main
         preflight.return_value = {
             "host_os": "windows",
@@ -98,13 +99,14 @@ class RunnerAgentTests(unittest.TestCase):
 
     @patch("tools.runner_agent.agent.collect_preflight")
     @patch("tools.runner_agent.agent.GatewayClient")
+    @patch("tools.runner_agent.agent.host_os", return_value="windows")
     @patch.dict("os.environ", {
         "DCP_GATEWAY_URL": "http://127.0.0.1:8789",
         "DCP_RUNNER_ID": "windows-enroll-test",
         "DCP_RUNNER_TOKEN": "x" * 40,
         "DCP_RUNNER_CAPABILITIES": "flutter,windows,macos",
     }, clear=True)
-    def test_enrollment_rejects_capabilities_not_detected_by_preflight(self, client_type, preflight):
+    def test_enrollment_rejects_capabilities_not_detected_by_preflight(self, _host, client_type, preflight):
         from tools.runner_agent.agent import main
         preflight.return_value = {
             "host_os": "windows",
