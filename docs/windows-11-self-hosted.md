@@ -22,7 +22,7 @@ The default stack uses Python's standard library. No pip installation is require
 1. Download or clone this repository to a folder you control.
 2. Double-click `Setup-DCP-Local.cmd` once for the read-only preflight.
 3. Double-click `Start-DCP-Local.cmd`.
-4. In the separate PowerShell window, create an owner username and password when prompted. The password must be at least 6 characters and is entered twice.
+4. In the separate PowerShell window, create an owner username and password when prompted. The password must be at least 14 characters and is entered twice.
 5. Open `http://127.0.0.1:8789/` and sign in.
 
 The owner credential record is stored at `%LOCALAPPDATA%\DCP\owner-auth.json` as a salted PBKDF2-HMAC-SHA256 hash (600,000 rounds), not plaintext. The file is restricted to the current Windows account. The Gateway database is `%LOCALAPPDATA%\DCP\gateway.sqlite3`.
