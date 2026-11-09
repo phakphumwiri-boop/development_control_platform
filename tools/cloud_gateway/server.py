@@ -471,7 +471,28 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(503, {"error": "job control plane unavailable"})
                 try:
                     if path == "/api/jobs":
-                        row, created = jobs.create(self.body(), self.headers.get("Idempotency-Key", ""))
+                        payload = self.body()
+                        repository = payload.get("repository")
+                        authorizer = getattr(service, "repository_authorizer", None)
+                        if callable(authorizer):
+                            try:
+                                allowed = authorizer(repository)
+                            except Exception:
+                                raise PolicyDenied("Repository access could not be verified", 503)
+                            if allowed is not True:
+                                raise PolicyDenied("Repository is not accessible to this GitHub App installation", 403)
+                        elif repository not in service.settings.allowed_repositories:
+                            raise PolicyDenied("Repository is not allowlisted", 403)
+                        resolver = getattr(service, "repository_commit_resolver", None)
+                        if not callable(resolver):
+                            raise PolicyDenied("Immutable commit verification is unavailable", 503)
+                        try:
+                            resolved = resolver(repository, payload.get("commit_sha"))
+                        except Exception:
+                            raise PolicyDenied("Commit could not be verified", 503)
+                        if not isinstance(resolved, dict) or resolved.get("commit_sha") != payload.get("commit_sha"):
+                            raise PolicyDenied("Commit SHA does not resolve in the selected repository", 403)
+                        row, created = jobs.create(payload, self.headers.get("Idempotency-Key", ""))
                         return self.send_json(202 if created else 200, self.public_job(row))
                     suffix = path[len("/api/jobs/"):]
                     if not suffix.endswith("/cancel"):
