@@ -1,5 +1,7 @@
 """Tests for isolated local Runner Agent workspaces; no code is executed."""
 import os
+import re
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -20,13 +22,39 @@ class WorkspaceManagerTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def assert_private_permissions(self, path, expected_posix_mode, require_protected_dacl=False):
+        if os.name != "nt":
+            self.assertEqual(path.stat().st_mode & 0o777, expected_posix_mode)
+            return
+
+        # Windows does not expose POSIX 0700/0600 semantics through st_mode.
+        # Inspect the actual NTFS DACL instead and reject broad principals.
+        script = "$acl = Get-Acl -LiteralPath $args[0]; Write-Output $acl.Sddl"
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+             script, str(path)],
+            check=True, capture_output=True, text=True,
+        )
+        sddl = result.stdout.strip()
+        self.assertTrue(sddl.startswith("O:"), f"Could not read DACL for {path}")
+        if require_protected_dacl:
+            self.assertIn("D:P", sddl, f"DACL inheritance must be disabled for {path}")
+
+        entries = re.findall(r"\((A|D);[^;]*;[^;]*;;;([^)]+)\)", sddl)
+        self.assertTrue(entries, f"No ACL entries found for {path}")
+        self.assertTrue(all(kind == "A" for kind, _ in entries),
+                        f"Unexpected deny ACE in {path}: {sddl}")
+        self.assertEqual({sid for _, sid in entries}, {"OW", "SY", "BA"},
+                         f"Unexpected Windows ACL principals for {path}: {sddl}")
+
     def test_allocates_private_distinct_workspaces_and_tracks_owner(self):
         a = self.manager.create(self.job_a, "worker-a")
         b = self.manager.create(self.job_b, "worker-b")
         self.assertNotEqual(a, b)
         self.assertEqual(a.parent, self.root)
-        self.assertEqual(a.stat().st_mode & 0o777, 0o700)
-        self.assertEqual((a / ".dcp-workspace.json").stat().st_mode & 0o777, 0o600)
+        self.assert_private_permissions(self.root, 0o700, require_protected_dacl=True)
+        self.assert_private_permissions(a, 0o700, require_protected_dacl=True)
+        self.assert_private_permissions(a / ".dcp-workspace.json", 0o600)
         self.assertEqual(self.manager.get(self.job_a, "worker-a"), a)
         self.assertEqual(self.manager.check_quota(self.job_a, "worker-a"), 0)
 
