@@ -37,6 +37,44 @@ def _tool(name: str, version_args=("--version",)) -> dict:
     return {"installed": True, "version": version}
 
 
+def _android_sdk_root() -> Path | None:
+    configured = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
+    candidates = [Path(configured)] if configured else []
+    if not configured:
+        if platform.system().lower() == "windows":
+            local_app_data = os.environ.get("LOCALAPPDATA")
+            if local_app_data:
+                candidates.append(Path(local_app_data) / "Android" / "Sdk")
+        elif platform.system().lower() == "darwin":
+            candidates.append(Path.home() / "Library" / "Android" / "sdk")
+        else:
+            candidates.append(Path.home() / "Android" / "Sdk")
+    return next((candidate for candidate in candidates if candidate.is_dir()), None)
+
+
+def _adb_tool(sdk_root: Path | None) -> dict:
+    discovered = _tool("adb", ("version",))
+    if discovered["installed"] or sdk_root is None:
+        return discovered
+    executable = sdk_root / "platform-tools" / ("adb.exe" if platform.system().lower() == "windows" else "adb")
+    if not executable.is_file():
+        return {"installed": False, "version": None}
+    try:
+        result = subprocess.run(
+            [str(executable), "version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+            check=False,
+        )
+        output = (result.stdout or result.stderr).strip().splitlines()
+        return {"installed": True, "version": output[0][:240] if output else None}
+    except (OSError, subprocess.TimeoutExpired):
+        return {"installed": True, "version": "installed; version probe unavailable"}
+
+
 def _visual_studio() -> dict:
     candidates = [
         Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
@@ -66,12 +104,17 @@ def _visual_studio() -> dict:
 def collect_preflight() -> dict:
     system = platform.system().lower()
     host = {"darwin": "macos", "windows": "windows", "linux": "linux"}.get(system, system)
+    android_sdk_root = _android_sdk_root()
     tools = {
         "python": {"installed": True, "version": platform.python_version()},
         "git": _tool("git"),
         "flutter": _tool("flutter"),
         "java": _tool("java", ("-version",)),
-        "adb": _tool("adb", ("version",)),
+        "android_sdk": {
+            "installed": android_sdk_root is not None,
+            "version": str(android_sdk_root) if android_sdk_root else None,
+        },
+        "adb": _adb_tool(android_sdk_root),
     }
     if host == "windows":
         tools["visual_studio"] = _visual_studio()
@@ -89,9 +132,7 @@ def collect_preflight() -> dict:
     capabilities = []
     if flutter_ok and git_ok:
         capabilities.extend(["flutter", "web"])
-    if flutter_ok and git_ok and tools["java"]["installed"] and (
-        tools["adb"]["installed"] or os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
-    ):
+    if flutter_ok and git_ok and tools["java"]["installed"] and tools["android_sdk"]["installed"] and tools["adb"]["installed"]:
         capabilities.append("android")
     if host == "windows" and flutter_ok and git_ok and tools.get("visual_studio", {}).get("installed"):
         capabilities.append("windows")
