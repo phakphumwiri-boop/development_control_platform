@@ -883,6 +883,7 @@ async function buildJobsRefresh(){
  list.innerHTML='<div class="empty">Loading authenticated Job queue…</div>';
  try{
   await buildJobsSession();
+  if(!runnerUI.repositories.length)await runnerLoadRepositories();
   const data=await runnerJson("./api/jobs?limit=25");
   if(!Array.isArray(data.jobs))throw new Error("Invalid Job queue response");
   const rows=data.jobs;
@@ -916,7 +917,7 @@ async function buildJobCreate(){
  try{
   const payload={repository,commit_sha:sha,target};
   const job=await runnerJson("./api/jobs",{method:"POST",headers:{
-   "Content-Type":"application/json","Origin":location.origin,
+   "Content-Type":"application/json",
    "X-CSRF-Token":runnerUI.csrf,"Idempotency-Key":crypto.randomUUID()
   },body:JSON.stringify(payload)});
   runnerText("build-job-result","Job queued: "+job.id+" · "+job.state);
