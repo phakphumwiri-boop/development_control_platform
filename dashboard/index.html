@@ -889,7 +889,7 @@ async function localRunnerRefresh(){
   host.innerHTML='<table><thead><tr><th>Worker</th><th>Host</th><th>Capabilities</th><th>State</th><th>Last seen</th><th>Control</th></tr></thead><tbody>'+
    data.runners.map(worker=>{
     const id=runnerEsc(worker.worker_id),state=runnerEsc(worker.state);
-    const action=worker.state==="draining"?"enable":"drain";
+    const action=["draining","offline"].includes(worker.state)?"enable":"drain";
     const label=action==="enable"?"Enable":"Drain";
     return '<tr><td>'+id+'</td><td>'+runnerEsc(worker.host_os)+'</td><td>'+runnerEsc((worker.capabilities||[]).join(", "))+'</td><td>'+state+'</td><td>'+runnerEsc(worker.last_seen)+'</td><td><button type="button" data-local-runner-action="'+action+'" data-local-runner-id="'+id+'">'+label+'</button></td></tr>';
    }).join('')+'</tbody></table>';
