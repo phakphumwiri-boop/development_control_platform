@@ -57,24 +57,43 @@ $env:DCP_RUNNER_TOKENS = '{"win-runner-01":"<unique-32+-character-secret>"}'
 Restart the Gateway after configuring the token map. Ensure the Runner Registry
 database and job/artifact stores are persistent.
 
-## Configure a Windows Runner
+## Safe Runner Enrollment (no build execution)
 
-Install Git, Flutter, and the required platform toolchain, then set:
+After the read-only preflight passes, configure the Gateway URL, worker ID,
+and the unique runner token already provisioned for that worker:
 
 ```powershell
 $env:DCP_GATEWAY_URL = "https://dcp.example.internal"
 $env:DCP_RUNNER_ID = "win-runner-01"
 $env:DCP_RUNNER_TOKEN = "<same-secret-configured-on-gateway>"
+# Optional: restrict the detected capabilities; this cannot add capabilities.
 $env:DCP_RUNNER_CAPABILITIES = "flutter,windows,android,web"
+python -m tools.runner_agent.agent --enroll-only
+```
+
+Enrollment uses the authenticated `POST /v1/runner/enroll` endpoint. The
+Gateway records the host as **offline** so it is visible in the Runner inventory
+but cannot claim jobs. The command exits immediately after registration; it
+does not ping, claim, clone, checkout, or execute a repository. It never needs
+`DCP_RUNNER_EXECUTION_ENABLED`. The optional capability list must be a
+non-empty subset of the local preflight results. If omitted, all locally
+detected capabilities are registered.
+
+## Start a Runner (separate explicit opt-in)
+
+Only on a dedicated, disposable host after enrollment and operator review:
+
+```powershell
 $env:DCP_RUNNER_EXECUTION_ENABLED = "true"
 python -m tools.runner_agent.agent --once
 ```
 
 For a long-running service, omit `--once` and supervise the process with the
-host's service manager. Use a different worker ID and unique token for each
-runner. Linux/macOS use the same environment variables in their service
-manager; advertise only capabilities actually installed and tested on that
-host. Add `ios` only to a macOS runner with a working Xcode toolchain.
+host's service manager. Execution remains disabled unless explicitly enabled.
+The running agent registers as online and sends liveness pings. Linux/macOS use
+the same environment variables in their service manager; advertise only
+capabilities detected by preflight. Add `ios` only to a macOS runner with a
+working Xcode toolchain.
 
 ## Validation
 
