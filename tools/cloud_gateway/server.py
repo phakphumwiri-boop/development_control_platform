@@ -24,6 +24,8 @@ from .github_app_runtime import build_github_app_runtime
 from .job_control import JobConflict, JobNotFound, JobStore
 from .artifacts import ArtifactError, ArtifactStore
 from .runner_registry import RunnerRegistry, WorkerNotFound
+from .infrastructure import (FakeInfrastructureProvider, InfrastructureManager,
+                             InfrastructureStore, ProviderUnavailable, ResourceNotFound)
 
 
 class DisabledProvider:
@@ -167,6 +169,15 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
         def runner_registry(self):
             return getattr(service, "runner_registry", None)
 
+        def infrastructure_manager(self):
+            return getattr(service, "infrastructure_manager", None)
+
+        @staticmethod
+        def public_infrastructure(row):
+            keys = ("id", "provider_id", "target_os", "image_id", "template_id",
+                    "state", "created_at", "updated_at", "metadata")
+            return {key: row.get(key) for key in keys}
+
         @staticmethod
         def public_job(row):
             keys = ("id", "repository", "commit_sha", "target", "state",
@@ -262,6 +273,36 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 if registry is None:
                     return self.send_json(503, {"error": "local Runner registry unavailable"})
                 return self.send_json(200, {"runners": registry.list_workers()})
+            if path == "/api/infrastructure" or path.startswith("/api/infrastructure/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                if identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(403, {"error": "dashboard role required"})
+                manager = self.infrastructure_manager()
+                if manager is None:
+                    return self.send_json(503, {"error": "Infrastructure Manager unavailable"})
+                try:
+                    if path == "/api/infrastructure":
+                        query = parse_qs(urlparse(self.path).query)
+                        if query.get("view", [""])[0] == "catalog":
+                            return self.send_json(200, manager.catalog())
+                        return self.send_json(200, {"resources": [
+                            self.public_infrastructure(row) for row in manager.list_resources()]})
+                    parts = path[len("/api/infrastructure/"):].split("/")
+                    resource_id = parts[0]
+                    if not re.fullmatch(r"[0-9a-f-]{36}", resource_id):
+                        return self.send_json(400, {"error": "invalid resource id"})
+                    if len(parts) == 2 and parts[1] == "events":
+                        return self.send_json(200, {"events": manager.store.events(resource_id)})
+                    if len(parts) != 1:
+                        return self.send_json(404, {"error": "not found"})
+                    row = manager.inspect(resource_id)
+                    return self.send_json(200, self.public_infrastructure(row))
+                except ResourceNotFound:
+                    return self.send_json(404, {"error": "resource not found"})
+                except Exception:
+                    return self.send_json(503, {"error": "Infrastructure Manager operation failed"})
             if path.startswith("/api/artifacts/") and path.endswith("/download"):
                 identity = self.proxy_identity()
                 if not identity or identity.get("role") not in ("owner", "operator"):
@@ -472,6 +513,48 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def do_POST(self):
             path = urlparse(self.path).path
+            if path == "/api/infrastructure" or path.startswith("/api/infrastructure/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                if identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(403, {"error": "dashboard role required"})
+                if not self.same_origin():
+                    return self.send_json(403, {"error": "same-origin request required"})
+                if not self.csrf_valid(identity):
+                    return self.send_json(403, {"error": "CSRF validation failed"})
+                manager = self.infrastructure_manager()
+                if manager is None:
+                    return self.send_json(503, {"error": "Infrastructure Manager unavailable"})
+                try:
+                    if path == "/api/infrastructure":
+                        payload = self.body()
+                        key = self.headers.get("Idempotency-Key", "")
+                        row, created = manager.create(
+                            target_os=payload.get("target_os"),
+                            image_id=payload.get("image_id"),
+                            template_id=payload.get("template_id"),
+                            idempotency_key=key,
+                            provider_id=payload.get("provider_id"),
+                        )
+                        return self.send_json(201 if created else 200, self.public_infrastructure(row))
+                    parts = path[len("/api/infrastructure/"):].split("/")
+                    if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
+                        return self.send_json(400, {"error": "invalid infrastructure action"})
+                    resource_id, action = parts
+                    if action not in ("start", "stop", "restart"):
+                        return self.send_json(404, {"error": "not found"})
+                    self.body()
+                    row = getattr(manager, action)(resource_id)
+                    return self.send_json(200, self.public_infrastructure(row))
+                except ResourceNotFound:
+                    return self.send_json(404, {"error": "resource not found"})
+                except (ValueError, RuntimeError) as exc:
+                    return self.send_json(409, {"error": str(exc)})
+                except ProviderUnavailable:
+                    return self.send_json(503, {"error": "selected provider unavailable"})
+                except Exception:
+                    return self.send_json(503, {"error": "Infrastructure Manager operation failed"})
             if path == "/api/jobs" or path.startswith("/api/jobs/"):
                 identity = self.proxy_identity()
                 if not identity:
@@ -693,6 +776,29 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def do_DELETE(self):
             path = urlparse(self.path).path
+            if path.startswith("/api/infrastructure/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                if identity.get("role") != "owner":
+                    return self.send_json(403, {"error": "owner role required"})
+                if not self.same_origin():
+                    return self.send_json(403, {"error": "same-origin request required"})
+                if not self.csrf_valid(identity):
+                    return self.send_json(403, {"error": "CSRF validation failed"})
+                manager = self.infrastructure_manager()
+                if manager is None:
+                    return self.send_json(503, {"error": "Infrastructure Manager unavailable"})
+                resource_id = unquote(path[len("/api/infrastructure/"):])
+                if not re.fullmatch(r"[0-9a-f-]{36}", resource_id):
+                    return self.send_json(400, {"error": "invalid resource id"})
+                try:
+                    row = manager.delete(resource_id)
+                    return self.send_json(200, self.public_infrastructure(row))
+                except ResourceNotFound:
+                    return self.send_json(404, {"error": "resource not found"})
+                except Exception:
+                    return self.send_json(409, {"error": "infrastructure state conflict"})
             if path.startswith("/api/cloud-runners/"):
                 identity = self.proxy_identity()
                 if not identity:
@@ -831,6 +937,14 @@ def main():
         service.runner_registry = RunnerRegistry(runner_registry_path, runner_stale_seconds)
     except (ValueError, OSError) as exc:
         raise SystemExit("DCP Runner registry configuration is invalid") from exc
+    infrastructure_path = os.getenv("DCP_GATEWAY_INFRA_DATABASE", database_path + ".infra")
+    try:
+        service.infrastructure_manager = InfrastructureManager(
+            InfrastructureStore(infrastructure_path), {"fake": FakeInfrastructureProvider()},
+            default_provider="fake", provisioning_enabled=False,
+        )
+    except (ValueError, OSError) as exc:
+        raise SystemExit("DCP Infrastructure Manager configuration is invalid") from exc
     _start_expiry_reconciler(service, int(os.getenv("DCP_GATEWAY_RECONCILE_SECONDS", "30")))
     server = ThreadingHTTPServer(
         (host, port), make_handler(service, settings.api_token, proxy_secret, public_origin, runner_tokens)
