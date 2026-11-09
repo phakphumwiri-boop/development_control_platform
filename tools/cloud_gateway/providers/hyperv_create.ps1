@@ -7,6 +7,7 @@ $disk = $env:DCP_VM_DISK
 $switchName = $env:DCP_VM_SWITCH
 $memoryBytes = [long]$env:DCP_VM_MEMORY_MB * 1MB
 $cpuCount = [int]$env:DCP_VM_CPU
+$diskBytes = [long]$env:DCP_VM_DISK_GB * 1GB
 
 if (Get-VM -Name $name -ErrorAction SilentlyContinue) {
     throw "A VM with this name already exists."
@@ -17,7 +18,11 @@ if (-not (Test-Path -LiteralPath $image -PathType Leaf)) {
 if (-not (Get-VMSwitch -Name $switchName -ErrorAction SilentlyContinue)) {
     throw "The configured Hyper-V virtual switch is unavailable."
 }
-New-VHD -Path $disk -ParentPath $image -Differencing | Out-Null
+$base = Get-VHD -Path $image
+if ($base.Size -gt $diskBytes) {
+    throw "Requested VM disk is smaller than the base image."
+}
+New-VHD -Path $disk -ParentPath $image -SizeBytes $diskBytes -Differencing | Out-Null
 New-VM -Name $name -Generation 2 -MemoryStartupBytes $memoryBytes -VHDPath $disk -SwitchName $switchName | Out-Null
 Set-VMProcessor -VMName $name -Count $cpuCount
 Set-VMMemory -VMName $name -DynamicMemoryEnabled $false -StartupBytes $memoryBytes
