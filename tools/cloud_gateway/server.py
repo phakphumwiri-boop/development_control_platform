@@ -629,16 +629,17 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(403, {"error": "owner role required"})
                 if path.startswith("/api/runners/"):
                     parts = path[len("/api/runners/"):].split("/")
-                    if len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", parts[0]):
+                    worker_id = unquote(parts[0]) if parts else ""
+                    if len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker_id):
                         return self.send_json(404, {"error": "not found"})
                     registry = self.runner_registry()
                     if registry is None:
                         return self.send_json(503, {"error": "local Runner registry unavailable"})
                     try:
                         if parts[1] == "drain":
-                            row = registry.drain(parts[0])
+                            row = registry.drain(worker_id)
                         elif parts[1] == "enable":
-                            row = registry.enable(parts[0])
+                            row = registry.enable(worker_id)
                         else:
                             return self.send_json(404, {"error": "not found"})
                         return self.send_json(200, {"runner": row})
