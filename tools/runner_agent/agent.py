@@ -29,6 +29,10 @@ class GatewayError(RuntimeError):
     pass
 
 
+class JobCancelled(RuntimeError):
+    pass
+
+
 class GatewayClient:
     def __init__(self, base_url: str, token: str, timeout: int = 30):
         self.base_url = base_url.rstrip("/")
@@ -230,8 +234,16 @@ class RunnerAgent:
                 except queue.Empty:
                     pass
                 if time.monotonic() - last_heartbeat >= max(5, self.lease_seconds // 3):
-                    self.client.heartbeat(job_id, self.lease_seconds)
+                    heartbeat = self.client.heartbeat(job_id, self.lease_seconds)
                     last_heartbeat = time.monotonic()
+                    if heartbeat.get("state") == "cancel_requested":
+                        process.terminate()
+                        try:
+                            process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        raise JobCancelled("Job cancellation was requested")
             if lines:
                 self.client.log(job_id, "".join(lines)[-7500:])
             reader.join(timeout=2)
@@ -268,6 +280,11 @@ def main(argv=None):
             if job:
                 try:
                     agent.execute(job)
+                except JobCancelled:
+                    try:
+                        client.finish(job["id"], "cancelled", {"message": "Cancellation acknowledged"})
+                    except Exception:
+                        pass
                 except Exception as exc:
                     try:
                         client.log(job["id"], "Execution failed: " + str(exc), "stderr")
