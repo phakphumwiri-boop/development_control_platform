@@ -301,6 +301,8 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(200, self.public_infrastructure(row))
                 except ResourceNotFound:
                     return self.send_json(404, {"error": "resource not found"})
+                except LifecycleConflict:
+                    return self.send_json(409, {"error": "infrastructure state conflict"})
                 except Exception:
                     return self.send_json(503, {"error": "Infrastructure Manager operation failed"})
             if path.startswith("/api/artifacts/") and path.endswith("/download"):
@@ -549,10 +551,10 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(200, self.public_infrastructure(row))
                 except ResourceNotFound:
                     return self.send_json(404, {"error": "resource not found"})
-                except (ValueError, RuntimeError) as exc:
-                    return self.send_json(409, {"error": str(exc)})
                 except ProviderUnavailable:
                     return self.send_json(503, {"error": "selected provider unavailable"})
+                except (ValueError, LifecycleConflict) as exc:
+                    return self.send_json(409, {"error": str(exc)})
                 except Exception:
                     return self.send_json(503, {"error": "Infrastructure Manager operation failed"})
             if path == "/api/jobs" or path.startswith("/api/jobs/"):
