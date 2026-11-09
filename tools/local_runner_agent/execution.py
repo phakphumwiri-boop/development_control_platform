@@ -83,20 +83,19 @@ class FlutterBuildExecutor:
 
     @staticmethod
     def _terminate_tree(process: subprocess.Popen) -> None:
-        if process.poll() is not None:
-            return
         if os.name == "nt":
             taskkill = shutil.which("taskkill")
-            if taskkill:
+            if taskkill and process.poll() is None:
                 subprocess.run(
                     [taskkill, "/PID", str(process.pid), "/T", "/F"],
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL, timeout=10, check=False,
                 )
-            else:
+            elif process.poll() is None:
                 process.kill()
         else:
             try:
+                # Kill the process group even if its leader exited but a child still holds pipes.
                 os.killpg(process.pid, signal.SIGTERM)
                 try:
                     process.wait(timeout=3)
