@@ -1,6 +1,6 @@
 # Local Job Control Plane — milestones 1–2
 
-The local-first job API adds a durable SQLite queue and authenticated HTTP lifecycle endpoints. It does not execute repository code, launch a runner process, create VMs, or enable cloud provisioning.
+The local-first job API adds a durable SQLite queue, authenticated HTTP lifecycle endpoints, and per-job workspace isolation. It does not execute repository code, launch build commands, create VMs, or enable cloud provisioning.
 
 ## Dashboard API
 
@@ -26,7 +26,7 @@ The jobs database defaults to `DCP_GATEWAY_DATABASE + ".jobs"`; override with `D
 
 ## Safety boundary
 
-Expired leases are recovered before a claim. Old workers are fenced by the lease checks in the store. The API accepts no shell command, arbitrary environment, filesystem path, or provider selection. The local agent, workspace isolation, command policy, process-tree termination, resource limits, build execution, artifacts, VM creation, and Cloud Provisioning are not enabled in this milestone.
+Expired leases are recovered before a claim. Old workers are fenced by the lease checks in the store. The API accepts no shell command, arbitrary environment, filesystem path, or provider selection. Workspace allocation is local to the Runner host and does not imply repository checkout or build execution. Command policy, process-tree termination, resource limits, build execution, artifacts, VM creation, and Cloud Provisioning remain disabled.
 
 
 ## M3 — Local Runner Agent bootstrap
@@ -49,3 +49,29 @@ python -m tools.local_runner_agent --check
 ```
 
 The check reads only `/healthz`; it does not claim a job. The client uses Python's standard HTTPS certificate validation for remote Gateway origins. Job execution remains disabled until workspace isolation, command policy, cancellation, and resource limits are implemented and tested.
+
+
+## M5 — Per-job Workspace Isolation
+
+`tools/local_runner_agent/workspace.py` provides a local `WorkspaceManager` for Runner hosts.
+
+- Every workspace is created beneath one configured absolute root, using the canonical Job UUID as its directory name.
+- Workspace directories are mode `0700`; the ownership marker is mode `0600` and binds the directory to the exact Job UUID and authenticated worker ID.
+- Duplicate allocation, cross-job/cross-worker access, symlink roots, symlink workspace entries, and path escapes fail closed.
+- Active workspace count is bounded (default 8); regular-file bytes are measured against a per-workspace quota (default 2 GiB).
+- Cleanup requires a valid ownership marker and removes only the matching Job workspace.
+- The workspace manager does not clone a repository, extract an archive, spawn a process, or execute a build.
+
+Example (local Runner process only):
+
+```python
+from tools.local_runner_agent.workspace import WorkspaceManager
+
+manager = WorkspaceManager("/var/lib/dcp/workspaces")
+workspace = manager.create(job_id, authenticated_worker_id)
+# Future checkout/build stages may use this directory after their own policy gates.
+manager.check_quota(job_id, authenticated_worker_id)
+manager.cleanup(job_id, authenticated_worker_id)
+```
+
+The workspace E2E acceptance test creates a Job in the SQLite queue, claims it as a Runner, allocates an isolated workspace, verifies ownership and quota, cleans it, and records a terminal cancellation. It deliberately does not check out or execute untrusted repository content.
