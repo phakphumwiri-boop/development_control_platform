@@ -29,14 +29,24 @@ class WorkspaceManagerTests(unittest.TestCase):
 
         # Windows does not expose POSIX 0700/0600 semantics through st_mode.
         # Inspect the actual NTFS DACL instead and reject broad principals.
-        script = "$acl = Get-Acl -LiteralPath $args[0]; Write-Output $acl.Sddl"
+        # Embed the quoted path in the PowerShell command. With -Command,
+        # trailing native arguments are not reliably exposed through $args
+        # across Windows PowerShell and PowerShell 7 launch modes.
+        literal_path = str(path).replace("'", "''")
+        script = (
+            f"$acl = Get-Acl -LiteralPath '{literal_path}'; "
+            "[Console]::Out.WriteLine($acl.Sddl)"
+        )
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-             script, str(path)],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
             check=True, capture_output=True, text=True,
         )
-        sddl = result.stdout.strip()
-        self.assertTrue(sddl.startswith("O:"), f"Could not read DACL for {path}")
+        match = re.search(r"(?m)^(O:.*)$", result.stdout)
+        self.assertIsNotNone(
+            match,
+            f"Could not read DACL for {path}; stdout={result.stdout!r}; stderr={result.stderr!r}",
+        )
+        sddl = match.group(1).strip()
         if require_protected_dacl:
             self.assertIn("D:P", sddl, f"DACL inheritance must be disabled for {path}")
 
