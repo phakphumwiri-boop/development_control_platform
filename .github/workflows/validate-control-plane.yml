@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_self_hosted_windows_acceptance:
+        description: "Run acceptance checks on registered local Windows runners (requires them to be online)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -302,7 +308,7 @@ jobs:
           fi
   windows-runner-smoke-test:
     name: Windows runner acceptance (${{ matrix.runner_name }})
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_self_hosted_windows_acceptance == true
     strategy:
       fail-fast: false
       matrix:
