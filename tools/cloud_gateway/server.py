@@ -23,7 +23,7 @@ from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
 from .job_control import JobConflict, JobNotFound, JobStore
 from .artifacts import ArtifactError, ArtifactStore
-from .runner_registry import RunnerRegistry, WorkerNotFound
+from .runner_registry import RunnerRegistry, WorkerNotFound, WorkerNotReady
 from .scheduler import RunnerScheduler, RunnerNotEligible, RunnerNotRegistered
 from .infrastructure import (FakeInfrastructureProvider, InfrastructureManager,
                              InfrastructureStore, ProviderUnavailable, ResourceNotFound)
@@ -752,6 +752,8 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                         return self.send_json(200, {"runner": row})
                     except WorkerNotFound:
                         return self.send_json(404, {"error": "Runner not found"})
+                    except WorkerNotReady as exc:
+                        return self.send_json(409, {"error": str(exc)})
                 if path != "/api/cloud-runners":
                     return self.send_json(404, {"error": "not found"})
                 try:
