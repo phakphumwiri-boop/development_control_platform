@@ -198,8 +198,13 @@ input,select,textarea{border-color:#dbe3f0;background:#fff}
 <form id="auth-login-form" autocomplete="on">
 <div class="grid"><div class="field"><label for="auth-username">Email or username</label><input id="auth-username" name="username" autocomplete="username" required maxlength="254"></div>
 <div class="field"><label for="auth-password">Password</label><input id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="1" maxlength="1024"></div></div>
-<div class="actions"><button class="primary" id="auth-submit" type="submit" disabled>Sign in</button><button id="auth-logout" type="button" disabled>Sign out</button></div>
+<div class="actions"><button class="primary" id="auth-submit" type="submit" disabled>Sign in</button><button id="auth-logout" type="button" disabled>Sign out</button><button id="auth-forgot-password" type="button" aria-expanded="false" aria-controls="auth-recovery-help">ลืมรหัสผ่าน?</button></div>
 </form>
+<div id="auth-recovery-help" class="warn" role="note" hidden>
+ <strong>กู้คืนรหัสผ่าน Owner บนเครื่องนี้</strong>
+ <p>บัญชี DCP Local ยังไม่มีการกู้คืนผ่านอีเมล หากลืมรหัสผ่าน ให้หยุด DCP Stack ก่อน (กด Ctrl+C ในหน้าต่าง PowerShell ของ Stack) จากนั้นเปิด <code>Reset-DCP-Owner-Password.cmd</code> ในโฟลเดอร์โปรเจกต์และตั้งรหัสผ่านใหม่อย่างน้อย 14 ตัวอักษร เครื่องมือจะคง Username เดิมและสำรองไฟล์ข้อมูลรับรองเดิมไว้</p>
+ <p>เมื่อตั้งรหัสผ่านสำเร็จ ให้เริ่มระบบอีกครั้งด้วย <code>Start-DCP-Local.cmd</code> แล้วลงชื่อเข้าใช้ด้วยรหัสผ่านใหม่</p>
+</div>
 <div id="auth-session-status" class="output" role="status" aria-live="polite">Session: UNKNOWN — not authenticated.</div>
 <p class="small muted">Backend contract: <code>GET /api/auth/session</code>, <code>POST /api/auth/login</code>, <code>POST /api/auth/logout</code>. The local stack validates passwords server-side. GitHub Pages remains static-only and does not provide this authentication service.</p>
 </div></section>
@@ -715,8 +720,14 @@ function initPWA(){
 }
 async function initPasswordAuth(){
  const status=$("auth-backend-status"),session=$("auth-session-status"),submit=$("auth-submit"),form=$("auth-login-form"),logout=$("auth-logout");
+ const forgot=$("auth-forgot-password"),recoveryHelp=$("auth-recovery-help");
  const show=(el,text,state)=>{el.textContent=text;el.dataset.state=state||"unknown"};
  let csrfToken=null;
+ forgot.addEventListener("click",()=>{
+  const expanded=forgot.getAttribute("aria-expanded")==="true";
+  forgot.setAttribute("aria-expanded",String(!expanded));
+  recoveryHelp.hidden=expanded;
+ });
  async function sessionCheck(){
   submit.disabled=true;logout.disabled=true;
   try{
