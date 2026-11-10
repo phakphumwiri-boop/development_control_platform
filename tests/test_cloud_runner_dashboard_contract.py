@@ -36,6 +36,12 @@ class CloudRunnerDashboardContractTests(unittest.TestCase):
         self.assertNotIn("DCP_TRUSTED_PROXY_HMAC_SECRET", HTML)
         self.assertIn("./api/cloud-runners/status", HTML)
 
+    def test_offline_enrolled_runner_cannot_be_enabled_from_dashboard(self):
+        self.assertIn('worker.state==="draining"&&worker.can_enable===true', HTML)
+        self.assertIn('worker.state==="online"?"drain"', HTML)
+        self.assertIn('Agent heartbeat required', HTML)
+        self.assertIn('data-local-runner-action]:not(:disabled)', HTML)
+
 
 if __name__ == "__main__":
     unittest.main()
