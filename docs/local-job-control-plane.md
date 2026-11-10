@@ -6,7 +6,7 @@ The local-first job API adds a durable SQLite queue, authenticated HTTP lifecycl
 
 Dashboard routes use the existing trusted-proxy HMAC session. Reads require an owner/operator session. Mutations require same-origin plus CSRF validation. Job cancellation is owner-only.
 
-- `POST /api/jobs` — create with `Idempotency-Key`; payload allows only `repository`, immutable lowercase `commit_sha`, and `target` in `test|build|package`.
+- `POST /api/jobs` — create with `Idempotency-Key`; payload allows only `repository`, immutable lowercase `commit_sha`, and `target` in `test|build|package|build_android|build_web|build_windows|build_linux|build_macos|build_ios`.
 - `GET /api/jobs?limit=50` — list recent jobs.
 - `GET /api/jobs/{id}` — inspect a job.
 - `GET /api/jobs/{id}/events` — lifecycle events.
@@ -21,12 +21,14 @@ Runner routes use credentials separate from the gateway's internal API token and
 - `POST /v1/runner/{id}/heartbeat` — renew the authenticated worker's active lease.
 - `POST /v1/runner/{id}/logs` — append a bounded stdout/stderr/system log message.
 - `POST /v1/runner/{id}/finish` — report `succeeded|failed|cancelled`; only the current lease owner can finish.
+- `POST /v1/runner/{id}/artifacts` — upload one bounded `application/octet-stream` artifact while the authenticated worker owns the active lease.
+- `GET /api/artifacts/{artifact_id}/download` — authenticated Dashboard download with SHA-256 integrity verification.
 
 The jobs database defaults to `DCP_GATEWAY_DATABASE + ".jobs"`; override with `DCP_GATEWAY_JOBS_DATABASE`.
 
 ## Safety boundary
 
-Expired leases are recovered before a claim. Old workers are fenced by the lease checks in the store. The API accepts no shell command, arbitrary environment, filesystem path, or provider selection. Workspace allocation is local to the Runner host and does not imply repository checkout or build execution. Command policy, process-tree termination, resource limits, build execution, artifacts, VM creation, and Cloud Provisioning remain disabled.
+Expired leases are recovered before a claim. Old workers are fenced by the lease checks in the store. The API accepts no shell command, arbitrary environment, filesystem path, or provider selection. Workspace allocation is local to the Runner host and does not imply repository checkout or build execution. Artifact upload/storage, VM creation, and Cloud Provisioning remain disabled. Flutter build execution is opt-in and restricted to an explicit trusted-repository allowlist. It runs on the Runner host; it is not an OS sandbox, so only repositories approved by the operator may be executed, and production runners should be disposable/isolated hosts.
 
 
 ## M3 — Local Runner Agent bootstrap
@@ -75,3 +77,47 @@ manager.cleanup(job_id, authenticated_worker_id)
 ```
 
 The workspace E2E acceptance test creates a Job in the SQLite queue, claims it as a Runner, allocates an isolated workspace, verifies ownership and quota, cleans it, and records a terminal cancellation. It deliberately does not check out or execute untrusted repository content.
+
+
+## M6 — Flutter Build Execution
+
+The Runner Agent now has a one-job execution pipeline:
+
+`Gateway claim → per-job workspace → immutable GitHub commit archive → Flutter command allowlist → bounded process → Gateway logs/status → workspace cleanup`.
+
+- `GitHubCommitCheckout` downloads only `https://api.github.com/repos/{owner}/{repo}/zipball/{commit_sha}`; redirects are HTTPS-only and restricted to GitHub archive hosts.
+- Archive download and expanded size, entry count, paths, and file types are bounded. Path traversal, symlinks, special files, and non-Flutter commits are rejected. No Git hooks, submodules, or repository scripts run during checkout.
+- Flutter commands are fixed by target; arbitrary shell commands, command arguments, and environment variables are not accepted.
+- Supported targets: `test`, `build` (Android APK), `package` (Android App Bundle), `build_android`, `build_web`, `build_windows`, `build_linux`, `build_macos`, and `build_ios`.
+- macOS/iOS targets require a macOS host; Windows and Linux targets require their corresponding host OS.
+- Process execution has a bounded timeout, bounded combined output, process-group termination, and periodic Runner lease heartbeat/cancellation checks.
+- Execution is disabled by default. `--check` remains health-only. `--once` processes at most one job and requires `DCP_RUNNER_EXECUTION_ENABLED=1`, an absolute `DCP_RUNNER_WORKSPACE_ROOT`, and a non-empty JSON array in `DCP_RUNNER_TRUSTED_REPOSITORIES`.
+- Set `DCP_GITHUB_TOKEN` only as a host environment secret when private-repository read access is required. It is not stored in a job, logged, or passed in a URL.
+- This release does not yet upload build outputs as artifacts. Artifact capture, checksums, retention, and authenticated download are the next milestone.
+
+Example PowerShell configuration (use a dedicated, disposable Runner host and an operator-approved repository):
+
+```powershell
+$env:DCP_GATEWAY_URL = "https://<your-gateway-origin>"
+$env:DCP_RUNNER_WORKER_ID = "local-worker-01"
+$env:DCP_RUNNER_TOKEN = "<dedicated-runner-token>"
+$env:DCP_RUNNER_EXECUTION_ENABLED = "1"
+$env:DCP_RUNNER_WORKSPACE_ROOT = "D:\\DCP\\workspaces"
+$env:DCP_RUNNER_TRUSTED_REPOSITORIES = '["owner/repository"]'
+python -m tools.local_runner_agent --once
+```
+
+The command processes no more than one queued job. The host must have the Flutter SDK installed and on PATH. The Flutter process runs on the Runner host rather than inside an OS sandbox; do not add repositories to the trusted list unless their build/test code is approved for execution on that host.
+
+
+## M7 — Artifact Center
+
+- Flutter build output is collected from target-specific output paths. Single-file outputs (APK/AAB) are stored directly; directory outputs (Web, Windows, Linux, macOS, iOS) are packaged into a bounded ZIP.
+- Runner uploads use a dedicated bearer-authenticated endpoint and a sanitized filename header; browser credentials are never used for Runner upload.
+- Gateway storage uses a private absolute directory (default: `<DCP_GATEWAY_DATABASE>.artifacts`) configurable with `DCP_GATEWAY_ARTIFACTS_ROOT`.
+- `DCP_GATEWAY_MAX_ARTIFACT_BYTES` controls the per-artifact upload limit (default 100 MiB; maximum 1 GiB).
+- Each artifact receives a UUID, job/worker ownership record, size, creation timestamp, and SHA-256 digest. Upload requires a current Job lease and verifies it again after writing.
+- Files are written to private temporary files and atomically moved into storage. Download verifies the stored SHA-256 before streaming the file.
+- Dashboard APIs expose metadata only; the download route requires an authenticated owner/operator session and sets private/no-store and nosniff headers.
+- The Dashboard Build Jobs panel displays successful Job artifacts with authenticated download links. Artifacts are not exposed for failed or cancelled Jobs.
+- Retention pruning is available through `ArtifactStore.prune(retention_days=30)`; scheduling retention is an operator responsibility and is not enabled automatically in this increment.

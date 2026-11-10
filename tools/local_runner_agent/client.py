@@ -159,6 +159,61 @@ class GatewayClient:
             {"message": message, "stream": stream},
         )
 
+    def upload_artifact(self, job_id: str, file_path: str, name: str | None = None,
+                        max_bytes: int = 100 * 1024 * 1024) -> dict:
+        """Upload one bounded regular file over the authenticated Runner channel."""
+        self._validate_job_id(job_id)
+        from pathlib import Path
+        import re
+        path = Path(file_path)
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("artifact path must be a regular file")
+        artifact_name = path.name if name is None else name
+        if not isinstance(artifact_name, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", artifact_name
+        ):
+            raise ValueError("invalid artifact filename")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 1024 * 1024 * 1024:
+            raise ValueError("max_bytes must be between 1 byte and 1 GiB")
+        size = path.stat().st_size
+        if not 1 <= size <= max_bytes:
+            raise ValueError("artifact size is outside allowed bounds")
+        with path.open("rb") as handle:
+            data = handle.read(max_bytes + 1)
+        if len(data) != size or len(data) > max_bytes:
+            raise ValueError("artifact changed or exceeded its size limit")
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(size),
+            "X-DCP-Artifact-Name": artifact_name,
+            "Authorization": "Bearer " + self.config.token,
+        }
+        request = Request(
+            self.base_url + f"/v1/runner/{job_id}/artifacts",
+            data=data, headers=headers, method="POST",
+        )
+        try:
+            with build_opener(_NoRedirect).open(
+                request, timeout=max(60, self.config.timeout_seconds)
+            ) as response:
+                raw = response.read(32769)
+                if len(raw) > 32768:
+                    raise RunnerGatewayError("Gateway response exceeded the 32 KiB limit")
+        except HTTPError as exc:
+            raise RunnerGatewayError(
+                "Gateway rejected the artifact upload", status_code=exc.code
+            ) from None
+        except URLError:
+            raise RunnerGatewayError("Gateway artifact upload failed") from None
+        try:
+            result = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise RunnerGatewayError("Gateway returned an invalid artifact response") from None
+        if not isinstance(result, dict) or not isinstance(result.get("artifact"), dict):
+            raise RunnerGatewayError("Gateway returned an invalid artifact response")
+        return result["artifact"]
+
     def finish(
         self, job_id: str, outcome: str, result: dict | None = None,
         error_code: str | None = None,

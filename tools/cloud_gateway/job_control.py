@@ -82,7 +82,7 @@ class JobStore:
             raise ValueError("Invalid repository")
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise ValueError("Invalid commit SHA")
-        if target not in ("test", "build", "package"):
+        if target not in ("test", "build", "package", "build_android", "build_web", "build_windows", "build_linux", "build_macos", "build_ios"):
             raise ValueError("Unsupported target")
         normalized = {"repository": repository, "commit_sha": sha, "target": target}
         fingerprint = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
