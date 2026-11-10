@@ -908,11 +908,12 @@ async function localRunnerRefresh(){
   host.innerHTML='<table><thead><tr><th>Worker</th><th>Host</th><th>Capabilities</th><th>State</th><th>Last seen</th><th>Control</th></tr></thead><tbody>'+
    data.runners.map(worker=>{
     const id=runnerEsc(worker.worker_id),state=runnerEsc(worker.state);
-    const action=["draining","offline"].includes(worker.state)?"enable":"drain";
-    const label=action==="enable"?"Enable":"Drain";
-    return '<tr><td>'+id+'</td><td>'+runnerEsc(worker.host_os)+'</td><td>'+runnerEsc((worker.capabilities||[]).join(", "))+'</td><td>'+state+'</td><td>'+runnerEsc(worker.last_seen)+'</td><td><button type="button" data-local-runner-action="'+action+'" data-local-runner-id="'+id+'">'+label+'</button></td></tr>';
+    const action=worker.state==="online"?"drain":(worker.state==="draining"&&worker.can_enable===true?"enable":null);
+    const label=action==="enable"?"Enable":action==="drain"?"Drain":"Agent heartbeat required";
+    const disabled=action===null?"disabled":"";
+    return '<tr><td>'+id+'</td><td>'+runnerEsc(worker.host_os)+'</td><td>'+runnerEsc((worker.capabilities||[]).join(", "))+'</td><td>'+state+'</td><td>'+runnerEsc(worker.last_seen)+'</td><td><button type="button" data-local-runner-action="'+(action||"none")+'" data-local-runner-id="'+id+'" '+disabled+'>'+label+'</button></td></tr>';
    }).join('')+'</tbody></table>';
-  host.querySelectorAll("[data-local-runner-action]").forEach(button=>button.addEventListener("click",()=>localRunnerControl(button.dataset.localRunnerId,button.dataset.localRunnerAction)));
+  host.querySelectorAll("[data-local-runner-action]:not(:disabled)").forEach(button=>button.addEventListener("click",()=>localRunnerControl(button.dataset.localRunnerId,button.dataset.localRunnerAction)));
  }catch(error){host.innerHTML='<div class="empty">UNKNOWN — '+runnerEsc(error.message)+'</div>'}
 }
 async function localRunnerControl(workerId,action){
