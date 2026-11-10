@@ -68,6 +68,55 @@ class RunnerAgentTests(unittest.TestCase):
         client.finish.assert_not_called()
         client.upload.assert_not_called()
 
+    @patch("tools.runner_agent.agent.collect_preflight")
+    @patch("tools.runner_agent.agent.GatewayClient")
+    @patch("tools.runner_agent.agent.host_os", return_value="windows")
+    @patch.dict("os.environ", {
+        "DCP_GATEWAY_URL": "http://127.0.0.1:8789",
+        "DCP_RUNNER_ID": "windows-enroll-test",
+        "DCP_RUNNER_TOKEN": "x" * 40,
+    }, clear=True)
+    def test_enroll_only_does_not_require_execution_or_claim_jobs(self, _host, client_type, preflight):
+        from tools.runner_agent.agent import main
+        preflight.return_value = {
+            "host_os": "windows",
+            "minimum_agent_prerequisites_met": True,
+            "detected_capabilities": ["flutter", "web", "windows"],
+        }
+        client = client_type.return_value
+        client.enroll.return_value = {"runner": {
+            "worker_id": "windows-enroll-test", "host_os": "windows",
+            "capabilities": ["flutter", "web", "windows"], "state": "offline",
+        }}
+
+        self.assertEqual(main(["--enroll-only"]), 0)
+        client.enroll.assert_called_once_with(
+            "windows", ["flutter", "web", "windows"]
+        )
+        client.register.assert_not_called()
+        client.ping.assert_not_called()
+        client.claim.assert_not_called()
+
+    @patch("tools.runner_agent.agent.collect_preflight")
+    @patch("tools.runner_agent.agent.GatewayClient")
+    @patch("tools.runner_agent.agent.host_os", return_value="windows")
+    @patch.dict("os.environ", {
+        "DCP_GATEWAY_URL": "http://127.0.0.1:8789",
+        "DCP_RUNNER_ID": "windows-enroll-test",
+        "DCP_RUNNER_TOKEN": "x" * 40,
+        "DCP_RUNNER_CAPABILITIES": "flutter,windows,macos",
+    }, clear=True)
+    def test_enrollment_rejects_capabilities_not_detected_by_preflight(self, _host, client_type, preflight):
+        from tools.runner_agent.agent import main
+        preflight.return_value = {
+            "host_os": "windows",
+            "minimum_agent_prerequisites_met": True,
+            "detected_capabilities": ["flutter", "web", "windows"],
+        }
+        with self.assertRaises(SystemExit):
+            main(["--enroll-only"])
+        client_type.assert_not_called()
+
     def test_gateway_client_requires_token(self):
         client = GatewayClient("http://127.0.0.1:8000", "secret")
         self.assertEqual(client.base_url, "http://127.0.0.1:8000")

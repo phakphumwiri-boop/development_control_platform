@@ -10,7 +10,7 @@ from tools.cloud_gateway.artifacts import ArtifactStore
 from tools.cloud_gateway.job_control import JobStore
 from tools.cloud_gateway.runner_registry import RunnerRegistry
 from tools.cloud_gateway.server import make_handler
-from tools.runner_agent.agent import GatewayClient
+from tools.runner_agent.agent import GatewayClient, GatewayError
 
 
 class RunnerAgentGatewayE2ETests(unittest.TestCase):
@@ -85,18 +85,41 @@ class RunnerAgentGatewayE2ETests(unittest.TestCase):
         self.assertEqual(finished["state"], "succeeded")
         self.assertEqual(self.jobs.get(job["id"])["state"], "succeeded")
 
+    def test_enroll_only_registration_is_offline_and_cannot_claim_jobs(self):
+        job, created = self.jobs.create(
+            {"repository": "owner/repo", "commit_sha": "b" * 40, "target": "test"},
+            "runner-enroll-job-0001",
+        )
+        self.assertTrue(created)
+
+        registration = self.client.enroll("linux", ["flutter", "linux"])
+        runner = registration["runner"]
+        self.assertEqual(runner["worker_id"], self.worker_id)
+        self.assertEqual(runner["state"], "offline")
+        self.assertEqual(self.registry.allowed_targets(self.worker_id), [])
+        with self.assertRaises(GatewayError):
+            self.client.claim(30)
+        self.assertEqual(self.jobs.get(job["id"])["state"], "queued")
+
+        # A separate live-agent registration is the only transition to schedulable.
+        live = self.client.register("linux", ["flutter", "linux"])
+        self.assertEqual(live["runner"]["state"], "online")
+        self.assertIn("test", self.registry.allowed_targets(self.worker_id))
+
     def test_runner_credentials_are_required_and_scoped_to_worker(self):
         import urllib.error
         import urllib.request
 
-        request = urllib.request.Request(
-            self.client.base_url + "/v1/runner/ping",
-            data=b"{}",
-            headers={"Content-Type": "application/json"},
-        )
-        with self.assertRaises(urllib.error.HTTPError) as caught:
-            urllib.request.urlopen(request, timeout=3)
-        self.assertEqual(caught.exception.code, 401)
+        for endpoint in ("ping", "enroll"):
+            request = urllib.request.Request(
+                self.client.base_url + "/v1/runner/" + endpoint,
+                data=b'{"host_os":"linux","capabilities":["flutter","linux"]}',
+                headers={"Content-Type": "application/json"},
+            )
+            with self.subTest(endpoint=endpoint):
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(request, timeout=3)
+                self.assertEqual(caught.exception.code, 401)
 
 
 if __name__ == "__main__":

@@ -634,13 +634,18 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 if jobs is None:
                     return self.send_json(503, {"error": "job control plane unavailable"})
                 try:
-                    if path == "/v1/runner/register":
+                    if path in ("/v1/runner/register", "/v1/runner/enroll"):
                         registry = self.runner_registry()
                         if registry is None:
                             return self.send_json(503, {"error": "local Runner registry unavailable"})
                         payload = self.body()
                         try:
-                            row = registry.register(worker, payload.get("host_os"), payload.get("capabilities"))
+                            # Enrollment is deliberately offline. Only a running agent
+                            # may use /register to announce liveness and become schedulable.
+                            row = registry.register(
+                                worker, payload.get("host_os"), payload.get("capabilities"),
+                                online=(path == "/v1/runner/register"),
+                            )
                             return self.send_json(200, {"runner": row})
                         except (ValueError, TypeError) as exc:
                             return self.send_json(400, {"error": str(exc)})
