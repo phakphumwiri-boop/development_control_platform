@@ -365,6 +365,11 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
 
         self.assertIn("auth-login-form", html)
+        self.assertIn('id="auth-forgot-password"', html)
+        self.assertIn('id="auth-recovery-help"', html)
+        self.assertIn("Reset-DCP-Owner-Password.cmd", html)
+        self.assertIn("Start-DCP-Local.cmd", html)
+        self.assertIn("ยังไม่มีการกู้คืนผ่านอีเมล", html)
         self.assertNotIn(self.token, html)
         self.assertNotIn(self.secret, html)
 
