@@ -23,6 +23,10 @@ class WorkerConflict(RuntimeError):
     pass
 
 
+class WorkerNotReady(RuntimeError):
+    """Runner is not live enough for an operator lifecycle transition."""
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -87,8 +91,12 @@ class RunnerRegistry:
         item = dict(row)
         item["capabilities"] = json.loads(item["capabilities"])
         last_seen = datetime.fromisoformat(item["last_seen"])
-        if item["state"] != "draining" and last_seen < _now() - timedelta(seconds=self.stale_after_seconds):
+        stale = last_seen < _now() - timedelta(seconds=self.stale_after_seconds)
+        if stale:
             item["state"] = "offline"
+        # The UI may offer Enable only for a draining runner with a recent
+        # heartbeat. Enrollment-only/offline records are never operator-enabled.
+        item["can_enable"] = item["state"] == "draining" and not stale
         return item
 
     def register(
@@ -168,18 +176,32 @@ class RunnerRegistry:
 
     def drain(self, worker_id: str) -> dict:
         with self.lock, self.db() as conn:
-            changed = conn.execute(
-                "UPDATE local_runners SET state='draining' WHERE worker_id=?", (worker_id,)
-            ).rowcount
-            if not changed:
+            row = conn.execute(
+                "SELECT state,last_seen FROM local_runners WHERE worker_id=?", (worker_id,)
+            ).fetchone()
+            if row is None:
                 raise WorkerNotFound(worker_id)
+            last_seen = datetime.fromisoformat(row["last_seen"])
+            if (row["state"] != "online"
+                    or last_seen < _now() - timedelta(seconds=self.stale_after_seconds)):
+                raise WorkerNotReady("Only a live online Runner can be drained")
+            conn.execute(
+                "UPDATE local_runners SET state='draining' WHERE worker_id=?", (worker_id,)
+            )
         return self.get(worker_id)
 
     def enable(self, worker_id: str) -> dict:
         with self.lock, self.db() as conn:
-            changed = conn.execute(
-                "UPDATE local_runners SET state='online' WHERE worker_id=?", (worker_id,)
-            ).rowcount
-            if not changed:
+            row = conn.execute(
+                "SELECT state,last_seen FROM local_runners WHERE worker_id=?", (worker_id,)
+            ).fetchone()
+            if row is None:
                 raise WorkerNotFound(worker_id)
+            last_seen = datetime.fromisoformat(row["last_seen"])
+            if (row["state"] != "draining"
+                    or last_seen < _now() - timedelta(seconds=self.stale_after_seconds)):
+                raise WorkerNotReady("Only a recently heartbeating draining Runner can be enabled")
+            conn.execute(
+                "UPDATE local_runners SET state='online' WHERE worker_id=?", (worker_id,)
+            )
         return self.get(worker_id)
