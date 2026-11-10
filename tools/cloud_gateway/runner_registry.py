@@ -145,7 +145,7 @@ class RunnerRegistry:
         caps = set(worker["capabilities"])
         targets = []
         if "flutter" in caps:
-            targets.append("test")
+            targets.extend(("test", "build", "package"))
         if "android" in caps:
             targets.extend(("build", "build_android", "package"))
         if "web" in caps:
