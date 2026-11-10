@@ -291,7 +291,7 @@ class DashboardControlCenterV2Tests(unittest.TestCase):
             'api("/users/"+encodeURIComponent(owner))',
             'api("/users/"+encodeURIComponent(owner)+"/repos?type=public&sort=updated&per_page=100")',
             '["repo-name","pr-repo","ev-repo","ros-api-repository"]',
-            'Permission: UNKNOWN', 'does not switch linked GitHub connector account',
+            'Permission: UNKNOWN', 'ไม่สลับ linked GitHub connector account',
             'Private repositories',
         ):
             with self.subTest(expected=expected):
