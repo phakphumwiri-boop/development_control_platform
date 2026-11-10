@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from tools.cloud_gateway.job_control import JobStore
-from tools.cloud_gateway.runner_registry import RunnerRegistry, WorkerNotFound
+from tools.cloud_gateway.runner_registry import RunnerRegistry, WorkerNotFound, WorkerNotReady
 
 
 class RunnerRegistryTests(unittest.TestCase):
@@ -46,15 +46,41 @@ class RunnerRegistryTests(unittest.TestCase):
         self.assertEqual(active["state"], "online")
         self.assertIn("build_windows", self.registry.allowed_targets("runner-enrolled"))
 
-    def test_stale_runner_is_reported_offline_and_cannot_claim(self):
+    def test_stale_runner_is_reported_offline_and_cannot_claim_or_be_enabled(self):
         self.registry.register("runner-stale", "linux", ["flutter", "linux"])
+        self.registry.drain("runner-stale")
         with self.registry.db() as conn:
             conn.execute(
                 "UPDATE local_runners SET last_seen='2000-01-01T00:00:00+00:00' WHERE worker_id=?",
                 ("runner-stale",),
             )
-        self.assertEqual(self.registry.get("runner-stale")["state"], "offline")
+        stale = self.registry.get("runner-stale")
+        self.assertEqual(stale["state"], "offline")
+        self.assertFalse(stale["can_enable"])
         self.assertEqual(self.registry.allowed_targets("runner-stale"), [])
+        with self.assertRaises(WorkerNotReady):
+            self.registry.enable("runner-stale")
+
+    def test_offline_enrollment_cannot_be_enabled_without_agent_heartbeat(self):
+        enrolled = self.registry.register(
+            "runner-enrolled", "windows", ["flutter", "windows"], online=False
+        )
+        self.assertEqual(enrolled["state"], "offline")
+        self.assertFalse(enrolled["can_enable"])
+        with self.assertRaises(WorkerNotReady):
+            self.registry.enable("runner-enrolled")
+
+    def test_drain_requires_live_online_runner_and_enable_requires_recent_heartbeat(self):
+        self.registry.register("runner-live", "linux", ["flutter", "linux"])
+        drained = self.registry.drain("runner-live")
+        self.assertEqual(drained["state"], "draining")
+        self.assertTrue(drained["can_enable"])
+        with self.assertRaises(WorkerNotReady):
+            self.registry.drain("runner-live")
+        self.assertEqual(self.registry.heartbeat("runner-live")["state"], "draining")
+        enabled = self.registry.enable("runner-live")
+        self.assertEqual(enabled["state"], "online")
+        self.assertFalse(enabled["can_enable"])
 
     def test_rejects_invalid_worker_capabilities(self):
         with self.assertRaises(ValueError):
