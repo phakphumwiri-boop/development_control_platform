@@ -130,6 +130,29 @@ class GatewayClient:
         """Read non-secret Gateway health metadata; this endpoint is intentionally public."""
         return self._request("GET", "/healthz", authenticated=False)
 
+    def register(self, host_os: str, capabilities: list[str]) -> dict:
+        """Register this credential-bound Runner and its self-reported capabilities."""
+        if host_os not in ("linux", "windows", "macos"):
+            raise ValueError("host_os must be linux, windows, or macos")
+        if not isinstance(capabilities, list) or not capabilities:
+            raise ValueError("capabilities must be a non-empty list")
+        result = self._request(
+            "POST", "/v1/runner/register",
+            {"host_os": host_os, "capabilities": capabilities},
+        )
+        runner = result.get("runner")
+        if not isinstance(runner, dict):
+            raise RunnerGatewayError("Gateway returned an invalid Runner registration")
+        return runner
+
+    def heartbeat_worker(self) -> dict:
+        """Refresh Runner liveness without extending any Job lease."""
+        result = self._request("POST", "/v1/runner/ping", {})
+        runner = result.get("runner")
+        if not isinstance(runner, dict):
+            raise RunnerGatewayError("Gateway returned an invalid Runner heartbeat")
+        return runner
+
     def claim(self, lease_seconds: int = 30) -> dict | None:
         self._validate_lease(lease_seconds)
         result = self._request(

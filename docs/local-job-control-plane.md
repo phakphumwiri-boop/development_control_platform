@@ -17,7 +17,9 @@ Dashboard routes use the existing trusted-proxy HMAC session. Reads require an o
 
 Runner routes use credentials separate from the gateway's internal API token and browser session. Configure `DCP_RUNNER_TOKENS` as a JSON object mapping worker IDs to unique tokens of at least 32 characters. Do not commit tokens or put them in dashboard configuration.
 
-- `POST /v1/runner/claim` — optional `lease_seconds` (5–300); worker identity comes from its credential, never the request body.
+- `POST /v1/runner/register` — register host OS and allowlisted build capabilities; worker identity comes from its credential, never the request body.
+- `POST /v1/runner/ping` — refresh fleet liveness.
+- `POST /v1/runner/claim` — optional `lease_seconds` (5–300); only jobs supported by the registered Runner capabilities are claimable.
 - `POST /v1/runner/{id}/heartbeat` — renew the authenticated worker's active lease.
 - `POST /v1/runner/{id}/logs` — append a bounded stdout/stderr/system log message.
 - `POST /v1/runner/{id}/finish` — report `succeeded|failed|cancelled`; only the current lease owner can finish.
@@ -104,6 +106,7 @@ $env:DCP_RUNNER_TOKEN = "<dedicated-runner-token>"
 $env:DCP_RUNNER_EXECUTION_ENABLED = "1"
 $env:DCP_RUNNER_WORKSPACE_ROOT = "D:\\DCP\\workspaces"
 $env:DCP_RUNNER_TRUSTED_REPOSITORIES = '["owner/repository"]'
+$env:DCP_RUNNER_CAPABILITIES = '["flutter","windows","android","web"]'
 python -m tools.local_runner_agent --once
 ```
 
@@ -121,3 +124,15 @@ The command processes no more than one queued job. The host must have the Flutte
 - Dashboard APIs expose metadata only; the download route requires an authenticated owner/operator session and sets private/no-store and nosniff headers.
 - The Dashboard Build Jobs panel displays successful Job artifacts with authenticated download links. Artifacts are not exposed for failed or cancelled Jobs.
 - Retention pruning is available through `ArtifactStore.prune(retention_days=30)`; scheduling retention is an operator responsibility and is not enabled automatically in this increment.
+
+
+## M8 — Local Runner Fleet Registry
+
+- The Gateway keeps a persistent inventory of local Runner workers, host OS, declared capabilities, registration time, last-seen time, and state (`online`, `draining`, `offline`). Configure its database with `DCP_GATEWAY_RUNNERS_DATABASE` (default `<DCP_GATEWAY_DATABASE>.runners`) and stale timeout with `DCP_GATEWAY_RUNNER_STALE_SECONDS`.
+- Worker identity is derived from its dedicated Runner token; the client never supplies its own worker ID in registration or heartbeat payloads.
+- A Runner must register before claiming work. Job claims are filtered by the Runner's registered capabilities: Flutter test, Android, Web, Windows, Linux, macOS, and iOS.
+- Unsupported platform jobs remain queued for a compatible worker instead of being claimed and failing on the wrong OS.
+- Runner liveness is refreshed during active builds. Workers older than `DCP_GATEWAY_RUNNER_STALE_SECONDS` (default 60 seconds; allowed 15–3600) are reported offline.
+- Dashboard operators can Drain a worker to stop new claims while allowing its active Job to finish, then Enable it again. A stale worker becomes online again only after it checks in.
+- Configure `DCP_RUNNER_CAPABILITIES` as a JSON array containing `flutter`, the host OS (`linux|windows|macos`), and only SDK targets actually installed on that host (for example `android`, `web`, `ios`). The default is only `flutter` plus the detected host OS; cross-platform targets are not assumed.
+- The CLI remains one-shot (`--once`); continuous polling/daemon supervision is a separate deployment decision.

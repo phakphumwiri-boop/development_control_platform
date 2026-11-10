@@ -23,6 +23,7 @@ from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
 from .job_control import JobConflict, JobNotFound, JobStore
 from .artifacts import ArtifactError, ArtifactStore
+from .runner_registry import RunnerRegistry, WorkerNotFound
 
 
 class DisabledProvider:
@@ -163,6 +164,9 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
         def artifact_store(self):
             return getattr(service, "artifact_store", None)
 
+        def runner_registry(self):
+            return getattr(service, "runner_registry", None)
+
         @staticmethod
         def public_job(row):
             keys = ("id", "repository", "commit_sha", "target", "state",
@@ -250,6 +254,14 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 except ValueError:
                     return self.send_json(400, {"error": "invalid pagination"})
                 return self.send_json(404, {"error": "not found"})
+            if path == "/api/runners":
+                identity = self.proxy_identity()
+                if not identity or identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                registry = self.runner_registry()
+                if registry is None:
+                    return self.send_json(503, {"error": "local Runner registry unavailable"})
+                return self.send_json(200, {"runners": registry.list_workers()})
             if path.startswith("/api/artifacts/") and path.endswith("/download"):
                 identity = self.proxy_identity()
                 if not identity or identity.get("role") not in ("owner", "operator"):
@@ -524,11 +536,39 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 if jobs is None:
                     return self.send_json(503, {"error": "job control plane unavailable"})
                 try:
+                    if path == "/v1/runner/register":
+                        registry = self.runner_registry()
+                        if registry is None:
+                            return self.send_json(503, {"error": "local Runner registry unavailable"})
+                        payload = self.body()
+                        try:
+                            row = registry.register(worker, payload.get("host_os"), payload.get("capabilities"))
+                            return self.send_json(200, {"runner": row})
+                        except (ValueError, TypeError) as exc:
+                            return self.send_json(400, {"error": str(exc)})
+                    if path == "/v1/runner/ping":
+                        registry = self.runner_registry()
+                        if registry is None:
+                            return self.send_json(503, {"error": "local Runner registry unavailable"})
+                        self.body()
+                        try:
+                            return self.send_json(200, {"runner": registry.heartbeat(worker)})
+                        except WorkerNotFound:
+                            return self.send_json(409, {"error": "Runner must register before heartbeat"})
                     if path == "/v1/runner/claim":
                         payload = self.body()
                         lease = payload.get("lease_seconds", 30)
                         jobs.recover_expired_leases()
-                        row = jobs.claim(worker, lease)
+                        registry = self.runner_registry()
+                        if registry is not None:
+                            runner = registry.get(worker)
+                            if runner is None:
+                                return self.send_json(409, {"error": "Runner must register before claiming jobs"})
+                            if runner.get("state") != "online":
+                                return self.send_json(409, {"error": "Runner is offline or draining"})
+                            row = jobs.claim(worker, lease, registry.allowed_targets(worker))
+                        else:
+                            row = jobs.claim(worker, lease)
                         return self.send_json(200, {"job": self.public_job(row) if row else None})
                     parts = path[len("/v1/runner/"):].split("/")
                     if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
@@ -587,6 +627,25 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(403, {"error": "CSRF validation failed"})
                 if identity.get("role") != "owner":
                     return self.send_json(403, {"error": "owner role required"})
+                if path.startswith("/api/runners/"):
+                    parts = path[len("/api/runners/"):].split("/")
+                    worker_id = unquote(parts[0]) if parts else ""
+                    if len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker_id):
+                        return self.send_json(404, {"error": "not found"})
+                    registry = self.runner_registry()
+                    if registry is None:
+                        return self.send_json(503, {"error": "local Runner registry unavailable"})
+                    try:
+                        self.body()
+                        if parts[1] == "drain":
+                            row = registry.drain(worker_id)
+                        elif parts[1] == "enable":
+                            row = registry.enable(worker_id)
+                        else:
+                            return self.send_json(404, {"error": "not found"})
+                        return self.send_json(200, {"runner": row})
+                    except WorkerNotFound:
+                        return self.send_json(404, {"error": "Runner not found"})
                 if path != "/api/cloud-runners":
                     return self.send_json(404, {"error": "not found"})
                 try:
@@ -766,6 +825,12 @@ def main():
         service.artifact_store = ArtifactStore(artifact_root, artifact_limit)
     except (ValueError, ArtifactError) as exc:
         raise SystemExit("DCP artifact storage configuration is invalid") from exc
+    runner_registry_path = os.getenv("DCP_GATEWAY_RUNNERS_DATABASE", database_path + ".runners")
+    try:
+        runner_stale_seconds = int(os.getenv("DCP_GATEWAY_RUNNER_STALE_SECONDS", "60"))
+        service.runner_registry = RunnerRegistry(runner_registry_path, runner_stale_seconds)
+    except (ValueError, OSError) as exc:
+        raise SystemExit("DCP Runner registry configuration is invalid") from exc
     _start_expiry_reconciler(service, int(os.getenv("DCP_GATEWAY_RECONCILE_SECONDS", "30")))
     server = ThreadingHTTPServer(
         (host, port), make_handler(service, settings.api_token, proxy_secret, public_origin, runner_tokens)

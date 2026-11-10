@@ -9,6 +9,7 @@ from pathlib import Path
 
 from tools.cloud_gateway.job_control import JobStore
 from tools.cloud_gateway.artifacts import ArtifactStore
+from tools.cloud_gateway.runner_registry import RunnerRegistry
 from tools.cloud_gateway.server import make_handler
 from tools.local_runner_agent.client import GatewayClient, RunnerAgentConfig
 from tools.local_runner_agent.execution import FlutterBuildExecutor
@@ -20,9 +21,10 @@ TOKEN = "runner-pipeline-e2e-token-which-is-long-enough"
 
 
 class _Service:
-    def __init__(self, jobs, artifacts=None):
+    def __init__(self, jobs, artifacts=None, registry=None):
         self.job_store = jobs
         self.artifact_store = artifacts
+        self.runner_registry = registry
 
 
 class _FixtureCheckout:
@@ -47,9 +49,10 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.jobs = JobStore(str(self.root / "jobs.sqlite3"))
         self.artifacts = ArtifactStore(self.root / "artifacts")
+        self.registry = RunnerRegistry(self.root / "runners.sqlite3")
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
-            make_handler(_Service(self.jobs, self.artifacts), "internal-gateway-token", runner_tokens={
+            make_handler(_Service(self.jobs, self.artifacts, self.registry), "internal-gateway-token", runner_tokens={
                 "runner-e2e": TOKEN,
             }),
         )
@@ -97,6 +100,7 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
             pipeline = RunnerPipeline(
                 self.client, self.manager, _FixtureCheckout(self.manager), executor,
                 trusted_repositories={"owner/mobile-app"},
+                capabilities={"flutter", "linux", "android"},
             )
             result = pipeline.run_once()
         finally:
@@ -154,6 +158,7 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
             pipeline = RunnerPipeline(
                 self.client, self.manager, _FixtureCheckout(self.manager), executor,
                 trusted_repositories={"owner/mobile-app"},
+                capabilities={"flutter", "linux", "android"},
             )
             result = pipeline.run_once()
         finally:

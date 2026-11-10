@@ -19,6 +19,7 @@ from tools.cloud_gateway.service import GatewayService
 from tools.cloud_gateway.store import RunnerStore
 from tools.cloud_gateway.job_control import JobStore
 from tools.cloud_gateway.artifacts import ArtifactStore
+from tools.cloud_gateway.runner_registry import RunnerRegistry
 from tools.local_runner_agent.client import GatewayClient, RunnerAgentConfig
 
 SECRET = "test-proxy-secret-that-is-at-least-32-bytes-long"
@@ -46,6 +47,8 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         self.job_store = JobStore(str(Path(self.temp.name) / "jobs.sqlite"))
         self.service.job_store = self.job_store
         self.service.artifact_store = ArtifactStore(Path(self.temp.name) / "artifacts")
+        self.registry = RunnerRegistry(Path(self.temp.name) / "runners.sqlite3")
+        self.service.runner_registry = self.registry
         self.runner_token = "runner-token-for-test-that-is-at-least-32-bytes"
         self.server = ThreadingHTTPServer(
             ("127.0.0.1", 0),
@@ -395,6 +398,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
             {"repository": "example/private-app", "commit_sha": "c" * 40, "target": "test"},
             "runner-job-key-0001",
         )
+        self.registry.register("worker-test-01", "linux", ["flutter", "linux"])
         def runner_request(path, body):
             data = json.dumps(body).encode()
             return Request(self.base + path, data=data, method="POST", headers={
@@ -453,6 +457,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
         ))
         health = agent.health()
         self.assertEqual(health["status"], "ok")
+        agent.register("linux", ["flutter", "linux"])
         claimed = agent.claim(lease_seconds=60)
         self.assertEqual(claimed["id"], job["id"])
         self.assertEqual(claimed["worker"], "worker-test-01")
@@ -613,6 +618,7 @@ class AuthenticatedControlAPITests(unittest.TestCase):
             worker_id="worker-test-01",
             token=self.runner_token,
         ))
+        client.register("linux", ["flutter", "linux"])
         metadata = client.upload_artifact(job["id"], str(artifact_file))
         self.assertEqual(metadata["sha256"], hashlib.sha256(payload).hexdigest())
 
@@ -637,6 +643,49 @@ class AuthenticatedControlAPITests(unittest.TestCase):
             self.assertEqual(error.exception.code, 403)
         finally:
             error.exception.close()
+
+    def test_runner_registry_dashboard_liveness_and_drain_gates_claim(self):
+        job, _ = self.job_store.create({
+            "repository": "example/private-app", "commit_sha": "f" * 40, "target": "test"
+        }, "runner-registry-job-0001")
+        client = GatewayClient(RunnerAgentConfig(
+            gateway_url=self.base, worker_id="worker-test-01", token=self.runner_token,
+        ))
+        registered = client.register("linux", ["flutter", "linux"])
+        self.assertEqual(registered["state"], "online")
+        self.assertEqual(client.heartbeat_worker()["state"], "online")
+
+        with urlopen(self.request("GET", "/api/runners", "nonce_runner_registry_list_01")) as response:
+            workers = json.loads(response.read())["runners"]
+        self.assertEqual(workers[0]["worker_id"], "worker-test-01")
+        self.assertEqual(workers[0]["state"], "online")
+
+        csrf = self._csrf("nonce_runner_registry_csrf_001")
+        with urlopen(self._dashboard_post(
+            "/api/runners/worker-test-01/drain", "nonce_runner_registry_drain_01", {},
+            csrf=csrf,
+        )) as response:
+            self.assertEqual(json.loads(response.read())["runner"]["state"], "draining")
+
+        claim_request = Request(
+            self.base + "/v1/runner/claim", data=b'{"lease_seconds":60}', method="POST",
+            headers={"Authorization": "Bearer " + self.runner_token,
+                     "Content-Type": "application/json"},
+        )
+        with self.assertRaises(HTTPError) as error:
+            urlopen(claim_request)
+        try:
+            self.assertEqual(error.exception.code, 409)
+        finally:
+            error.exception.close()
+
+        with urlopen(self._dashboard_post(
+            "/api/runners/worker-test-01/enable", "nonce_runner_registry_enable_01", {},
+            csrf=csrf,
+        )) as response:
+            self.assertEqual(json.loads(response.read())["runner"]["state"], "online")
+        claimed = client.claim(lease_seconds=60)
+        self.assertEqual(claimed["id"], job["id"])
 
 if __name__ == "__main__":
     unittest.main()

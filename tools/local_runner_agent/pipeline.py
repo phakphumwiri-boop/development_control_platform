@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import sys
 from dataclasses import asdict
 from typing import Protocol
 
@@ -29,6 +30,8 @@ class RunnerPipeline:
         heartbeat_interval_seconds: int = 10,
         trusted_repositories: set[str] | frozenset[str] = frozenset(),
         artifact_packager: FlutterArtifactPackager | None = None,
+        worker_os: str | None = None,
+        capabilities: set[str] | frozenset[str] | None = None,
     ):
         if isinstance(heartbeat_interval_seconds, bool) or not isinstance(heartbeat_interval_seconds, int) or not 5 <= heartbeat_interval_seconds <= 60:
             raise ValueError("heartbeat interval must be between 5 and 60 seconds")
@@ -39,9 +42,17 @@ class RunnerPipeline:
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.trusted_repositories = frozenset(trusted_repositories)
         self.artifact_packager = artifact_packager or FlutterArtifactPackager(workspaces)
+        detected_os = "windows" if sys.platform == "win32" else "macos" if sys.platform == "darwin" else "linux"
+        self.worker_os = worker_os or detected_os
+        self.capabilities = frozenset(capabilities or {"flutter", self.worker_os})
+        if self.worker_os not in ("linux", "windows", "macos"):
+            raise ValueError("worker_os must be linux, windows, or macos")
 
     def run_once(self) -> dict | None:
         """Claim at most one job. Returns None when the queue is empty."""
+        runner = self.client.register(self.worker_os, sorted(self.capabilities))
+        if runner.get("state") != "online":
+            raise ExecutionError("Runner is draining or offline and cannot claim new work")
         job = self.client.claim(lease_seconds=300)
         if job is None:
             return None
@@ -71,6 +82,7 @@ class RunnerPipeline:
                 if now - last_heartbeat < self.heartbeat_interval_seconds:
                     return False
                 current = self.client.heartbeat(job_id, lease_seconds=300)
+                self.client.heartbeat_worker()
                 last_heartbeat = now
                 return current.get("state") == "cancel_requested"
 

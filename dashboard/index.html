@@ -253,6 +253,11 @@ input,select,textarea{border-color:#dbe3f0;background:#fff}
  <div class="runner-table-wrap" id="runner-list"><div class="empty">UNKNOWN — ยังไม่ได้เชื่อมต่อ Runner API</div></div>
 </div>
 
+
+<div class="panel" id="local-runner-fleet">
+ <div class="row"><div><h3>Local Runner Fleet</h3><p class="small muted">แสดง Worker ที่ลงทะเบียนด้วย Runner token แยกจาก Cloud VM runners และสามารถ Drain เพื่อหยุดรับ Job ใหม่ได้</p></div><button id="local-runner-refresh" type="button">Refresh local runners</button></div>
+ <div id="local-runner-list"><div class="empty">Local Runner inventory: UNKNOWN</div></div>
+</div>
 <div class="panel" id="build-jobs-panel">
  <div class="row"><div><h3>Flutter Build Jobs & Artifacts</h3><p class="small muted">ใช้ Repository และ Commit SHA ที่เลือกและ Verify ไว้ด้านบน คิวงานนี้ไม่สร้าง VM และไม่เปิด Cloud Provisioning</p></div><button id="build-jobs-refresh" type="button">Refresh jobs</button></div>
  <div class="grid">
@@ -267,7 +272,7 @@ input,select,textarea{border-color:#dbe3f0;background:#fff}
  <div id="build-job-result" class="output" role="status" aria-live="polite">Build queue: not checked</div>
  <div id="build-job-list"><div class="empty">Job queue: UNKNOWN — press Refresh jobs</div></div>
 </div>
-<div class="panel"><h3>API connection contract</h3><p class="small">Dashboard ต้องเชื่อมกับ same-origin backend routes: <code>GET /api/auth/session</code>, <code>GET /api/github/repositories</code>, <code>GET /api/github/repositories/{owner}/{repo}/refs?kind=branches|tags</code>, <code>GET /api/github/repositories/{owner}/{repo}/commits/{sha}</code>, <code>GET /api/github/repositories/{owner}/{repo}/projects/{sha}</code>, <code>GET /api/cloud-runners/status</code>, <code>GET /api/cloud-runners</code>, <code>POST /api/cloud-runners</code> และ <code>DELETE /api/cloud-runners/{id}</code>, <code>POST /api/jobs</code>, <code>GET /api/jobs</code>, <code>GET /api/jobs/{id}/artifacts</code> และ <code>GET /api/artifacts/{artifact_id}/download</code>. Backend ต้องทำ authenticated proxy ไปยัง Gateway, จัดการ CSRF, idempotency และไม่ส่ง Gateway credential ลง browser</p><p class="small muted">GitHub Pages แบบ static ไม่สามารถเก็บ server secret หรือทำ proxy เองได้ หาก API routes ยังไม่ติดตั้ง หน้านี้จะแสดง UNKNOWN และปิดปุ่มสั่งงาน</p></div>
+<div class="panel"><h3>API connection contract</h3><p class="small">Dashboard ต้องเชื่อมกับ same-origin backend routes: <code>GET /api/auth/session</code>, <code>GET /api/github/repositories</code>, <code>GET /api/github/repositories/{owner}/{repo}/refs?kind=branches|tags</code>, <code>GET /api/github/repositories/{owner}/{repo}/commits/{sha}</code>, <code>GET /api/github/repositories/{owner}/{repo}/projects/{sha}</code>, <code>GET /api/cloud-runners/status</code>, <code>GET /api/cloud-runners</code>, <code>POST /api/cloud-runners</code> และ <code>DELETE /api/cloud-runners/{id}</code>, <code>POST /api/jobs</code>, <code>GET /api/jobs</code>, <code>GET /api/jobs/{id}/artifacts</code> และ <code>GET /api/artifacts/{artifact_id}/download</code>, <code>GET /api/runners</code>, <code>POST /api/runners/{worker_id}/drain</code> และ <code>POST /api/runners/{worker_id}/enable</code>. Backend ต้องทำ authenticated proxy ไปยัง Gateway, จัดการ CSRF, idempotency และไม่ส่ง Gateway credential ลง browser</p><p class="small muted">GitHub Pages แบบ static ไม่สามารถเก็บ server secret หรือทำ proxy เองได้ หาก API routes ยังไม่ติดตั้ง หน้านี้จะแสดง UNKNOWN และปิดปุ่มสั่งงาน</p></div>
 </section><section class="view active" id="home"><div class="stats"><div class="stat"><span class="muted small">Registered projects</span><strong>0</strong><span class="small muted">Opt-in only</span></div><div class="stat"><span class="muted small">Selected repo</span><strong id="selected">—</strong></div><div class="stat"><span class="muted small">Evidence</span><strong id="evidence-stat">UNKNOWN</strong></div><div class="stat"><span class="muted small">Write actions</span><strong>0</strong><span class="small muted">Disabled</span></div></div><div class="panel"><h2>Available tools</h2><p>Use the navigation to inspect public repositories and PRs, validate evidence structure, plan quality gates, generate a checkpoint, and export an audit checklist.</p><p><b>READ → ANALYZE → WRITE/MODIFY → TEST → AUDIT</b></p><div class="route-legend" aria-label="Shared workflow route colors"><span class="route-tag route-read">READ</span><span class="route-tag route-analyze">ANALYZE</span><span class="route-tag route-write">WRITE / MODIFY</span><span class="route-tag route-test">TEST</span><span class="route-tag route-audit">AUDIT</span><span class="route-state" data-status="unknown">UNKNOWN</span></div><p>Write/modify is intentionally unavailable in this release. Missing, stale, mismatched or unverifiable results remain UNKNOWN.</p></div></section>
 <section class="view" id="github-api"><div class="panel"><h2>Research OS API Integration</h2><p>เชื่อมต่อ API ผ่าน Google sign-in และ one-time OAuth handoff; session token เก็บในหน่วยความจำของแท็บนี้เท่านั้น ไม่บันทึกลง localStorage หรือ URL</p><div class="warn">สิทธิ์ฝั่งเซิร์ฟเวอร์เป็นตัวตัดสิน: ต้องเป็น Research OS owner และ repository ต้องอยู่ใน allowlist ของ Backend เท่านั้น การเชื่อมต่อเป็น read-only ไม่มีคำสั่ง push/merge/deploy</div><div class="output" id="ros-api-local-guidance"><strong>ใช้งาน Dashboard บนเครื่อง (Windows)</strong><p>เปิด repository ในเครื่อง แล้วเรียก <code>Open-DCP-Dashboard.cmd</code> เพื่อเปิดหน้าเว็บบน 127.0.0.1 โดยเลือกพอร์ตว่างอัตโนมัติ</p><div class="actions"><button type="button" data-copy-command="Open-DCP-Dashboard.cmd">Copy local launch command</button></div><p>โหมด Local ใช้เครื่องมืออ่าน Public GitHub, PR review, SHA/evidence และ quality gates ได้โดยไม่ต้อง sign-in ผ่าน Research OS API. หากต้องการ Google sign-in ให้เปิด backend แยกในเครื่องและให้รองรับ API contract นี้ก่อน: GET <code>/health</code> (JSON health check), POST <code>/v1/auth/google/start</code>, POST <code>/v1/auth/google/handoff</code>, และ GET <code>/v1/github/dashboard</code>. Dashboard นี้เปิดเฉพาะ UI และไม่ได้สร้าง backend หรือ OAuth secrets ให้. ค่าเริ่มต้นคือ <code>http://127.0.0.1:8788</code>; หาก backend ใช้พอร์ตอื่นให้แก้ URL แล้วกด Check local API. HTTP อนุญาตเฉพาะ loopback; OAuth authorization ต้องเป็น HTTPS บน accounts.google.com และ session อยู่ในหน่วยความจำแท็บนี้เท่านั้น. Health check สำเร็จเป็นเพียงหลักฐานว่า endpoint ตอบกลับ ไม่ได้พิสูจน์ว่า OAuth หรือ owner authorization ผ่าน</p></div><div class="grid"><div class="field"><label for="ros-api-base">Research OS API base URL</label><input id="ros-api-base" type="url" value="http://127.0.0.1:8788" autocomplete="url"></div><div class="field"><label for="ros-api-repository">Repository allowlisted on server</label><input id="ros-api-repository" value="phakphoum38-stack/ENTERPRISE_API_ARCHITECTURE_LOGIC_TH" autocomplete="off"></div></div><div class="actions"><button id="ros-api-health">Check local API</button><button class="primary" id="ros-api-connect">Connect with Google</button><button id="ros-api-sync">Sync Google OAuth</button><button id="ros-api-load" disabled>Load GitHub dashboard</button><button id="ros-api-disconnect" disabled>Disconnect</button><a href="https://dashboard.render.com/web/srv-db2jv449v7es738cejm0/env" target="_blank" rel="noopener noreferrer">Render environment</a></div><div id="ros-api-status" class="output" aria-live="polite">Not connected. API status is UNKNOWN until authenticated.</div><div id="ros-api-result" class="empty" aria-live="polite">No API data loaded.</div></div></section>
 <section class="view" id="repo-selector"><div class="panel"><h2>Shared GitHub Account & Repository Selector</h2><p>เลือก public GitHub account/organization ก่อน แล้วโหลด repository เพื่อใช้เป็นค่าเริ่มต้นร่วมกันในเครื่องมืออื่น</p><div class="warn"><b>ข้อจำกัด:</b> ตัวเลือกนี้อ่าน public GitHub API โดยไม่ sign-in และไม่สลับ linked GitHub connector account, ไม่แสดง private repositories และไม่ยืนยันสิทธิ์เข้าถึง การยืนยันตัวตนต้องทำผ่าน backend OAuth/GitHub App แยกต่างหาก</div><div class="grid"><div class="field"><label for="shared-owner">GitHub account / organization</label><select id="shared-owner"><option value="phakphum12345">phakphum12345</option><option value="phakphoum38-stack">phakphoum38-stack</option><option value="__custom__">Other account / organization…</option></select><input id="shared-owner-custom" placeholder="Enter GitHub username or organization" autocomplete="off" hidden></div><div class="field"><label for="shared-repo">Repository</label><select id="shared-repo" disabled><option value="">Load account repositories first</option></select></div></div><div class="actions"><button class="primary" id="shared-load">Load public repositories</button><button id="shared-apply" disabled>Apply selection to tools</button><button id="shared-clear">Clear selection</button></div><div id="shared-status" class="output" aria-live="polite">No shared account or repository selected. Permission: UNKNOWN.</div></div></section>
@@ -872,6 +877,37 @@ async function runnerLoadList(){
  }catch(error){$("runner-list").innerHTML='<div class="empty">UNKNOWN — '+runnerEsc(error.message)+'</div>'}
 }
 
+
+async function localRunnerRefresh(){
+ const host=$("local-runner-list");
+ host.innerHTML='<div class="empty">Loading local Runner inventory…</div>';
+ try{
+  await buildJobsSession();
+  const data=await runnerJson("./api/runners");
+  if(!Array.isArray(data.runners))throw new Error("Invalid local Runner registry response");
+  if(!data.runners.length){host.innerHTML='<div class="empty">No local Runners registered.</div>';return}
+  host.innerHTML='<table><thead><tr><th>Worker</th><th>Host</th><th>Capabilities</th><th>State</th><th>Last seen</th><th>Control</th></tr></thead><tbody>'+
+   data.runners.map(worker=>{
+    const id=runnerEsc(worker.worker_id),state=runnerEsc(worker.state);
+    const action=["draining","offline"].includes(worker.state)?"enable":"drain";
+    const label=action==="enable"?"Enable":"Drain";
+    return '<tr><td>'+id+'</td><td>'+runnerEsc(worker.host_os)+'</td><td>'+runnerEsc((worker.capabilities||[]).join(", "))+'</td><td>'+state+'</td><td>'+runnerEsc(worker.last_seen)+'</td><td><button type="button" data-local-runner-action="'+action+'" data-local-runner-id="'+id+'">'+label+'</button></td></tr>';
+   }).join('')+'</tbody></table>';
+  host.querySelectorAll("[data-local-runner-action]").forEach(button=>button.addEventListener("click",()=>localRunnerControl(button.dataset.localRunnerId,button.dataset.localRunnerAction)));
+ }catch(error){host.innerHTML='<div class="empty">UNKNOWN — '+runnerEsc(error.message)+'</div>'}
+}
+async function localRunnerControl(workerId,action){
+ if(!["drain","enable"].includes(action))return;
+ try{
+  await buildJobsSession();
+  const data=await runnerJson("./api/runners/"+encodeURIComponent(workerId)+"/"+action,{
+   method:"POST",headers:{"X-CSRF-Token":runnerUI.csrf,"Content-Type":"application/json"},body:"{}"
+  });
+  runnerText("build-job-result","Local Runner "+workerId+" is now "+data.runner.state+".");
+  await localRunnerRefresh();
+ }catch(error){runnerText("build-job-result","Runner control failed: "+error.message)}
+}
+
 async function buildJobsSession(){
  const session=await runnerJson("./api/auth/session");
  runnerUI.session=session.authenticated===true;
@@ -1035,6 +1071,7 @@ document.querySelectorAll("[data-runner-os]").forEach(button=>button.addEventLis
 }));
 $("runner-refresh").addEventListener("click",runnerRefresh);
 $("build-jobs-refresh").addEventListener("click",buildJobsRefresh);
+$("local-runner-refresh").addEventListener("click",localRunnerRefresh);
 $("build-job-create").addEventListener("click",buildJobCreate);
 $("runner-repository").addEventListener("change",buildJobsUpdateGate);
 $("runner-commit-sha").addEventListener("input",buildJobsUpdateGate);
