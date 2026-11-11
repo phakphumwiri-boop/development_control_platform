@@ -147,7 +147,7 @@ The local Windows stack can provision a dedicated Runner credential without plac
 
    Omit `-Once` to run the worker loop until Ctrl+C. Execution is never enabled by the setup command or offline-enrollment default.
 
-The Gateway listens on loopback port 18790; the Dashboard remains on 8789. The Runner credential file is read-only to the Gateway setup path and never injected into build subprocesses. Build subprocesses receive only the safe OS/toolchain environment allowlist. Cloud Provisioning remains disabled.
+The Gateway listens on loopback port 18790; the Dashboard remains on 8789. The Gateway reads the protected token map at startup; Runner tokens are never injected into build subprocesses. Build subprocesses receive only the safe OS/toolchain environment allowlist. Cloud Provisioning remains disabled.
 
 If the credential file is created or changed while the Gateway is running, restart the local stack before enrollment so the Gateway reloads the worker token map.
 
