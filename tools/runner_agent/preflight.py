@@ -160,6 +160,38 @@ def collect_preflight() -> dict:
     }
 
 
+
+def resolve_capabilities(report: dict, configured=None) -> list[str]:
+    """Return only capabilities verified by the read-only host preflight.
+
+    The physical host OS is stored separately in RunnerRegistry.host_os; it is
+    not itself proof that a platform build toolchain is installed.
+    """
+    if not isinstance(report, dict) or not report.get("minimum_agent_prerequisites_met"):
+        raise ValueError("Runner host preflight failed: Git and Flutter are required")
+    host = report.get("host_os")
+    if host not in ("windows", "linux", "macos"):
+        raise ValueError("Runner preflight reported an unsupported host OS")
+    detected = report.get("detected_capabilities")
+    if not isinstance(detected, list) or any(
+        not isinstance(item, str) for item in detected
+    ):
+        raise ValueError("Runner preflight capabilities are invalid")
+    detected_set = set(detected)
+    if "flutter" not in detected_set:
+        raise ValueError("Runner preflight did not verify Flutter and Git")
+    if configured is None:
+        return sorted(detected_set)
+    if (not isinstance(configured, (list, tuple, set, frozenset))
+            or not configured
+            or any(not isinstance(item, str) or not item for item in configured)):
+        raise ValueError("DCP_RUNNER_CAPABILITIES must be a non-empty list")
+    selected = set(configured)
+    if len(selected) != len(configured) or not selected.issubset(detected_set):
+        raise ValueError("DCP_RUNNER_CAPABILITIES must be a unique subset of preflight-detected capabilities")
+    return sorted(selected)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Read-only DCP Runner host preflight")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
