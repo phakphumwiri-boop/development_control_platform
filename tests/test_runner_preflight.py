@@ -8,9 +8,6 @@ from tools.runner_agent import preflight
 
 
 class RunnerPreflightTests(unittest.TestCase):
-    @patch("tools.runner_agent.preflight.platform.system", return_value="Linux")
-    @patch("tools.runner_agent.preflight.platform.python_version", return_value="3.12.0")
-    @patch("tools.runner_agent.preflight.shutil.which")
     def test_windows_host_without_visual_studio_keeps_android_and_web_capabilities(self):
         report = {
             "host_os": "windows",
@@ -28,6 +25,9 @@ class RunnerPreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "subset"):
             preflight.resolve_capabilities(report, ["flutter", "windows"])
 
+    @patch("tools.runner_agent.preflight.platform.system", return_value="Linux")
+    @patch("tools.runner_agent.preflight.platform.python_version", return_value="3.12.0")
+    @patch("tools.runner_agent.preflight.shutil.which")
     @patch("tools.runner_agent.preflight.subprocess.run")
     def test_linux_capabilities_require_complete_platform_toolchain(
         self, run, which, _python, _system
