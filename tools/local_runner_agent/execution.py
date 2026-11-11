@@ -134,50 +134,67 @@ class FlutterBuildExecutor:
             process.kill()
             process.wait(timeout=5)
 
-    def run(
-        self,
-        job_id: str,
-        worker_id: str,
-        target: str,
-        *,
-        cancel_requested: Callable[[], bool] | None = None,
-    ) -> BuildResult:
-        if not self.enabled:
-            raise ExecutionError("build execution is disabled by runner policy")
-        command = self.command_for(target)
-        workspace = self.workspaces.get(job_id, worker_id)
-        project_root = workspace / "source" if (workspace / "source").is_dir() else workspace
-        if target in ("build_macos", "build_ios") and sys.platform != "darwin":
-            raise ExecutionError("macOS and iOS builds require a macOS Runner host")
-        if target == "build_windows" and sys.platform != "win32":
-            raise ExecutionError("Windows builds require a Windows Runner host")
-        if target == "build_linux" and not sys.platform.startswith("linux"):
-            raise ExecutionError("Linux builds require a Linux Runner host")
-        if not (project_root / "pubspec.yaml").is_file():
-            raise ExecutionError("Flutter project manifest is missing")
-        if shutil.which(self.flutter_executable) is None:
-            raise ExecutionError("Flutter SDK executable is not available on PATH")
-        self.workspaces.check_quota(job_id, worker_id)
+    def _build_environment(self, workspace: Path) -> dict[str, str]:
+        """Construct a bounded build environment with isolated caches and temp files."""
+        home = workspace / ".runner-home"
+        pub_cache = workspace / ".pub-cache"
+        gradle_home = workspace / ".gradle"
+        temp_root = workspace / ".tmp"
+        for directory in (home, pub_cache, gradle_home, temp_root):
+            directory.mkdir(mode=0o700, exist_ok=True)
 
         env = {
             "PATH": os.environ.get("PATH", ""),
-            "HOME": str(workspace / ".runner-home"),
-            "USERPROFILE": str(workspace / ".runner-home"),
-            "PUB_CACHE": str(workspace / ".pub-cache"),
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "PUB_CACHE": str(pub_cache),
+            "GRADLE_USER_HOME": str(gradle_home),
+            "TMPDIR": str(temp_root),
+            "TEMP": str(temp_root),
+            "TMP": str(temp_root),
             "CI": "true",
             "FLUTTER_SUPPRESS_ANALYTICS": "true",
             "GIT_TERMINAL_PROMPT": "0",
             "LANG": "C.UTF-8",
         }
-        Path(env["HOME"]).mkdir(mode=0o700, exist_ok=True)
-        Path(env["PUB_CACHE"]).mkdir(mode=0o700, exist_ok=True)
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
-        started = time.monotonic()
+        # Flutter/Gradle on Windows need these OS/toolchain variables even though
+        # the Runner deliberately does not inherit the full user environment.
+        for name in (
+            "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "LOCALAPPDATA",
+            "ANDROID_SDK_ROOT", "ANDROID_HOME", "JAVA_HOME",
+            "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+        ):
+            value = os.environ.get(name)
+            if value:
+                env[name] = value
+        sdk_root = env.get("ANDROID_SDK_ROOT") or env.get("ANDROID_HOME")
+        if not sdk_root and env.get("LOCALAPPDATA"):
+            candidate = Path(env["LOCALAPPDATA"]) / "Android" / "Sdk"
+            if candidate.is_dir():
+                sdk_root = str(candidate)
+        if sdk_root:
+            env["ANDROID_SDK_ROOT"] = sdk_root
+            env["ANDROID_HOME"] = sdk_root
+        return env
+
+    def _run_process(
+        self,
+        command: tuple[str, ...],
+        project_root: Path,
+        env: dict[str, str],
+        *,
+        deadline: float,
+        cancel_requested: Callable[[], bool] | None,
+        output_bytes: int,
+    ) -> tuple[str, str | None, int | None, int]:
         process = subprocess.Popen(
             self._process_command(command), cwd=str(project_root), env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             shell=False, close_fds=True, start_new_session=(os.name != "nt"),
-            creationflags=creationflags,
+            creationflags=(
+                getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                if os.name == "nt" else 0
+            ),
         )
         messages: queue.Queue = queue.Queue()
 
@@ -199,17 +216,15 @@ class FlutterBuildExecutor:
             thread.start()
 
         finished_streams = set()
-        output_bytes = 0
         outcome = "succeeded"
         error_code = None
-        deadline = started + self.timeout_seconds
         try:
             while len(finished_streams) < 2 or process.poll() is None:
                 now = time.monotonic()
-                if now >= deadline:
+                if process.poll() is None and now >= deadline:
                     outcome, error_code = "failed", "BUILD_TIMEOUT"
                     self._terminate_tree(process)
-                elif cancel_requested and cancel_requested():
+                elif process.poll() is None and cancel_requested and cancel_requested():
                     outcome, error_code = "cancelled", None
                     self._terminate_tree(process)
                 try:
@@ -226,9 +241,9 @@ class FlutterBuildExecutor:
                     outcome, error_code = "failed", "OUTPUT_LIMIT_EXCEEDED"
                     self._terminate_tree(process)
                     continue
-                text = chunk.decode("utf-8", errors="replace")
-                for offset in range(0, len(text), 7000):
-                    self.log(stream, text[offset:offset + 7000])
+                decoded = chunk.decode("utf-8", errors="replace")
+                for offset in range(0, len(decoded), 7000):
+                    self.log(stream, decoded[offset:offset + 7000])
                 if process.poll() is not None and len(finished_streams) == 2:
                     break
         finally:
@@ -241,8 +256,63 @@ class FlutterBuildExecutor:
                     pipe.close()
 
         return_code = process.returncode
-        if outcome == "succeeded" and return_code != 0:
-            outcome, error_code = "failed", "BUILD_FAILED"
+        return outcome, error_code, return_code, output_bytes
+
+    def run(
+        self,
+        job_id: str,
+        worker_id: str,
+        target: str,
+        *,
+        cancel_requested: Callable[[], bool] | None = None,
+    ) -> BuildResult:
+        if not self.enabled:
+            raise ExecutionError("build execution is disabled by runner policy")
+        command = self.command_for(target)
+        workspace = self.workspaces.get(job_id, worker_id)
+        project_root = workspace / "source" if (workspace / "source").is_dir() else workspace
+        if target in ("build_macos", "build_ios") and sys.platform != "darwin":
+            raise ExecutionError("macOS and iOS builds require a macOS Runner host")
+        if target == "build_windows" and sys.platform != "win32":
+            raise ExecutionError("Windows builds require a Windows Runner host")
+        if target == "build_linux" and not sys.platform.startswith("linux"):
+            raise ExecutionError("Linux builds require a Linux Runner host")
+        if not (project_root / "pubspec.yaml").is_file():
+            raise ExecutionError("Flutter project manifest is missing")
+        lockfile = project_root / "pubspec.lock"
+        if lockfile.is_symlink() or not lockfile.is_file():
+            raise ExecutionError("Flutter lockfile is missing or unsafe")
+        if shutil.which(self.flutter_executable) is None:
+            raise ExecutionError("Flutter SDK executable is not available on PATH")
+        self.workspaces.check_quota(job_id, worker_id)
+
+        env = self._build_environment(workspace)
+        started = time.monotonic()
+        deadline = started + self.timeout_seconds
+        output_bytes = 0
+        outcome = "succeeded"
+        error_code = None
+        return_code = 0
+
+        # Resolve dependencies from the committed lockfile before invoking a
+        # build/test command. --enforce-lockfile prevents silent dependency drift.
+        steps = (
+            (("flutter", "pub", "get", "--enforce-lockfile"), "DEPENDENCY_RESOLUTION_FAILED"),
+            (command, "BUILD_FAILED"),
+        )
+        for step_command, failure_code in steps:
+            self.log("system", "Executing: " + " ".join(step_command))
+            outcome, error_code, return_code, output_bytes = self._run_process(
+                step_command, project_root, env, deadline=deadline,
+                cancel_requested=cancel_requested, output_bytes=output_bytes,
+            )
+            if outcome != "succeeded":
+                break
+            if return_code != 0:
+                outcome, error_code = "failed", failure_code
+                break
+            self.workspaces.check_quota(job_id, worker_id)
+
         if outcome == "succeeded":
             self.workspaces.check_quota(job_id, worker_id)
         return BuildResult(
