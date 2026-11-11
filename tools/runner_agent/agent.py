@@ -12,7 +12,9 @@ import queue
 import threading
 import os
 import platform
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -22,9 +24,10 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import urlparse
 
 from .preflight import collect_preflight, resolve_capabilities
+from tools.local_runner_agent.execution import FlutterBuildExecutor
 
 
 class GatewayError(RuntimeError):
@@ -35,29 +38,76 @@ class JobCancelled(RuntimeError):
     pass
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward a Runner bearer token to a redirected origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class GatewayClient:
     def __init__(self, base_url: str, token: str, timeout: int = 30):
+        parsed = urlparse(base_url)
+        try:
+            loopback_http = (
+                parsed.scheme == "http"
+                and parsed.hostname in ("127.0.0.1", "localhost", "::1")
+            )
+            valid_origin = (
+                (parsed.scheme == "https" or loopback_http)
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.path in ("", "/")
+                and not parsed.params
+                and not parsed.query
+                and not parsed.fragment
+                and (parsed.port is None or 1 <= parsed.port <= 65535)
+            )
+        except ValueError:
+            valid_origin = False
+        if not valid_origin:
+            raise ValueError("DCP_GATEWAY_URL must be an HTTPS origin (HTTP is allowed only on loopback)")
+        if not isinstance(token, str) or len(token) < 32:
+            raise ValueError("DCP_RUNNER_TOKEN must contain at least 32 characters")
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 60:
+            raise ValueError("Gateway timeout must be between 1 and 60 seconds")
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.opener = urllib.request.build_opener(_NoRedirect())
 
     def request(self, path, payload=None, data=None, headers=None):
+        if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+            raise ValueError("Gateway request path must be an absolute API path")
         body = data
-        request_headers = {"Authorization": "Bearer " + self.token, "Accept": "application/json"}
+        request_headers = {"Accept": "application/json"}
         if payload is not None:
-            body = json.dumps(payload).encode("utf-8")
+            body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
         request_headers.update(headers or {})
+        request_headers["Authorization"] = "Bearer " + self.token
         req = urllib.request.Request(self.base_url + path, data=body, headers=request_headers)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                raw = response.read()
+            with self.opener.open(req, timeout=self.timeout) as response:
+                raw = response.read(32769)
+                if len(raw) > 32768:
+                    raise GatewayError("Gateway response exceeded the 32 KiB limit")
                 return json.loads(raw.decode("utf-8")) if raw else {}
         except urllib.error.HTTPError as exc:
-            detail = exc.read(4096).decode("utf-8", "replace")
-            raise GatewayError("Gateway returned HTTP %s: %s" % (exc.code, detail)) from None
-        except (urllib.error.URLError, TimeoutError) as exc:
-            raise GatewayError("Gateway connection failed: %s" % exc) from None
+            raise GatewayError("Gateway returned HTTP %s" % exc.code) from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise GatewayError("Gateway connection failed") from None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise GatewayError("Gateway returned an invalid JSON response") from None
+
+    @staticmethod
+    def _validate_job_id(job_id):
+        if not isinstance(job_id, str) or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            job_id,
+        ):
+            raise ValueError("invalid job UUID")
 
     def register(self, host_os, capabilities):
         return self.request("/v1/runner/register", {"host_os": host_os, "capabilities": capabilities})
@@ -72,27 +122,46 @@ class GatewayClient:
         return self.request("/v1/runner/claim", {"lease_seconds": lease_seconds}).get("job")
 
     def heartbeat(self, job_id, lease_seconds):
+        self._validate_job_id(job_id)
         return self.request("/v1/runner/" + job_id + "/heartbeat", {"lease_seconds": lease_seconds})
 
     def log(self, job_id, message, stream="stdout"):
+        self._validate_job_id(job_id)
         return self.request("/v1/runner/" + job_id + "/logs", {"message": message[:8000], "stream": stream})
 
     def finish(self, job_id, outcome, result=None, error_code=None):
+        self._validate_job_id(job_id)
         return self.request("/v1/runner/" + job_id + "/finish", {
             "outcome": outcome, "result": result, "error_code": error_code,
         })
 
-    def upload(self, job_id, path: Path):
-        data = path.read_bytes()
-        return self.request(
+    def upload(self, job_id, path: Path, max_bytes: int = 100 * 1024 * 1024):
+        self._validate_job_id(job_id)
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("artifact path must be a regular file")
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 1024 * 1024 * 1024:
+            raise ValueError("artifact size limit is invalid")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", path.name):
+            raise ValueError("artifact filename is invalid")
+        size = path.stat().st_size
+        if not 1 <= size <= max_bytes:
+            raise ValueError("artifact size is outside allowed bounds")
+        with path.open("rb") as handle:
+            data = handle.read(max_bytes + 1)
+        if len(data) != size or len(data) > max_bytes:
+            raise ValueError("artifact changed or exceeded its size limit")
+        result = self.request(
             "/v1/runner/" + job_id + "/artifacts", data=data,
             headers={
                 "Content-Type": "application/octet-stream",
-                "Content-Length": str(len(data)),
+                "Content-Length": str(size),
                 "X-DCP-Artifact-Name": path.name,
             },
-        ).get("artifact")
-
+        )
+        artifact = result.get("artifact") if isinstance(result, dict) else None
+        if not isinstance(artifact, dict):
+            raise GatewayError("Gateway returned an invalid artifact response")
+        return artifact
 
 def host_os():
     value = platform.system().lower()
