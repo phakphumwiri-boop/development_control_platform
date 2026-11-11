@@ -58,7 +58,8 @@ if ($EnableExecution) {
             throw "Invalid trusted repository name: $repository"
         }
     }
-    if (@($TrustedRepository | Select-Object -Unique).Count -ne $TrustedRepository.Count) {
+    $uniqueTrustedRepositories = @($TrustedRepository | Select-Object -Unique)
+    if ($uniqueTrustedRepositories.Count -ne $TrustedRepository.Count) {
         throw 'Trusted repositories must be unique.'
     }
     foreach ($repository in $TrustedRepository) {
