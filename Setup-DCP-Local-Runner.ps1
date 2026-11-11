@@ -15,7 +15,7 @@ $credentialFile = Join-Path $dataDir 'runner-tokens.json'
 $tokenMap = @{}
 $workerPattern = '^[a-z0-9_.:-]{1,100}$'
 
- $existingItem = Get-Item -LiteralPath $credentialFile -Force -ErrorAction SilentlyContinue
+$existingItem = Get-Item -LiteralPath $credentialFile -Force -ErrorAction SilentlyContinue
 if ($null -ne $existingItem) {
     $isReparsePoint = (($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
     if ($isReparsePoint -or $existingItem.PSIsContainer) {
