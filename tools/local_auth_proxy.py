@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -30,6 +31,39 @@ COOKIE = "DCP_LOCAL_SESSION"
 MAX_BODY = 32_768
 ALLOWED_GET = ("/api/cloud-runners/status", "/api/cloud-runners")
 CREDENTIALS = Path(os.getenv("DCP_LOCAL_AUTH_CREDENTIAL_FILE", str(Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "DCP" / "owner-auth.json")))
+
+
+RUNNER_TOKENS_FILE = CREDENTIALS.parent / "runner-tokens.json"
+MAX_RUNNER_TOKEN_FILE_BYTES = 64 * 1024
+
+
+def load_runner_tokens(path: Path | None = None) -> dict[str, str]:
+    """Load the protected local Runner token map without logging or exposing secrets."""
+    target = Path(path) if path is not None else RUNNER_TOKENS_FILE
+    if not target.exists():
+        return {}
+    if target.is_symlink() or not target.is_file():
+        raise SystemExit("Local Runner credential file must be a regular non-symlink file")
+    if target.stat().st_size > MAX_RUNNER_TOKEN_FILE_BYTES:
+        raise SystemExit("Local Runner credential file exceeds its size limit")
+    try:
+        value = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        raise SystemExit("Local Runner credential file is unreadable or invalid JSON") from None
+    if not isinstance(value, dict) or not 1 <= len(value) <= 16:
+        raise SystemExit("Local Runner credential file must contain 1..16 worker credentials")
+    for worker, token in value.items():
+        if (
+            not isinstance(worker, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker)
+            or not isinstance(token, str)
+            or len(token) < 32
+            or len(token) > 256
+        ):
+            raise SystemExit("Local Runner credential file contains an invalid worker credential")
+    if len(set(value.values())) != len(value):
+        raise SystemExit("Local Runner credentials must be unique per worker")
+    return value
 
 
 def password_record(username: str, password: str, salt: bytes | None = None) -> dict:
@@ -355,6 +389,9 @@ def main():
     gateway_token = secrets.token_urlsafe(48)
     proxy_secret = secrets.token_urlsafe(48)
     env = os.environ.copy()
+    runner_tokens = load_runner_tokens()
+    if runner_tokens:
+        env["DCP_RUNNER_TOKENS"] = json.dumps(runner_tokens, separators=(",", ":"))
     env.update({
         "DCP_GATEWAY_HOST": HOST, "DCP_GATEWAY_PORT": str(GATEWAY_PORT),
         "DCP_GATEWAY_API_TOKEN": gateway_token, "DCP_TRUSTED_PROXY_HMAC_SECRET": proxy_secret,
