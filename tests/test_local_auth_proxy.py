@@ -380,6 +380,28 @@ class LocalRunnerCredentialFileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             self.assertEqual(auth.load_runner_tokens(Path(temp) / "missing.json"), {})
 
+    def test_gateway_environment_uses_protected_file_runner_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            credentials = {"windows-local-01": "r" * 48}
+            path.write_text(json.dumps(credentials), encoding="utf-8")
+            with patch.object(auth, "RUNNER_TOKENS_FILE", path):
+                env = auth.gateway_child_environment({
+                    "PATH": "safe-path",
+                    "DCP_RUNNER_TOKENS": "inherited-value-must-be-overridden",
+                })
+            self.assertEqual(
+                json.loads(env["DCP_RUNNER_TOKENS"]),
+                credentials,
+            )
+            self.assertEqual(env["PATH"], "safe-path")
+
+    def test_gateway_environment_keeps_explicit_environment_when_no_file_exists(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(auth, "RUNNER_TOKENS_FILE", Path(temp) / "missing.json"):
+                env = auth.gateway_child_environment({"DCP_RUNNER_TOKENS": '{"worker":"' + "x" * 40 + '"}'})
+            self.assertIn("DCP_RUNNER_TOKENS", env)
+
     def test_loads_valid_local_runner_credential_map(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "runner-tokens.json"
