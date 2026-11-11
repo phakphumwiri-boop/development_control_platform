@@ -372,6 +372,12 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
         self.assertIn("ยังไม่มีการกู้คืนผ่านอีเมล", html)
         self.assertNotIn(self.token, html)
         self.assertNotIn(self.secret, html)
+        with urlopen(self.base + "/recon-back-box/", timeout=3) as response:
+            recon_html = response.read().decode("utf-8")
+            self.assertEqual(response.status, 200)
+        self.assertIn("Recon Back Box", recon_html)
+        self.assertIn("/api/recon", recon_html)
+        self.assertNotIn("https://api.github.com", recon_html)
         self.assertIn("/api/recon", html)
         self.assertNotIn("https://api.github.com", html)
 
