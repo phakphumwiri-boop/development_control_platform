@@ -106,7 +106,8 @@ class PublicGitHubRepositoryCatalog:
         data = self._request("/repos/{}/{}".format(
             urllib.parse.quote(owner, safe=""), urllib.parse.quote(name, safe="")
         ))
-        if not isinstance(data, dict) or data.get("full_name", "").lower() != repository.lower():
+        full_name = data.get("full_name") if isinstance(data, dict) else None
+        if not isinstance(full_name, str) or full_name.lower() != repository.lower():
             raise PublicGitHubError("Public repository metadata did not match the allowlisted name")
         if data.get("private") is not False:
             raise PermissionError("Repository is private or unavailable to unauthenticated GitHub access")
@@ -128,6 +129,10 @@ class PublicGitHubRepositoryCatalog:
             return True
         except PermissionError:
             return False
+        except PublicGitHubError as exc:
+            if exc.status == 404:
+                return False
+            raise
 
     def list_repositories(self) -> list[dict]:
         rows = []
