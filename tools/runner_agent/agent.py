@@ -275,8 +275,6 @@ class RunnerAgent:
             r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository
         ):
             raise ValueError("invalid GitHub repository")
-        if repository not in self.trusted_repositories:
-            raise RuntimeError("repository is not in the Runner trusted-repository allowlist")
         if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError("invalid immutable commit SHA")
 
@@ -286,6 +284,8 @@ class RunnerAgent:
         }.get(target)
         if required_os and host_os() != required_os:
             raise RuntimeError("Job target does not match this Runner host")
+        if repository not in self.trusted_repositories:
+            raise RuntimeError("repository is not in the Runner trusted-repository allowlist")
         required_capabilities = {
             "test": {"flutter"},
             "build": {"android"},
