@@ -72,5 +72,26 @@ class RuntimeCompositionTests(unittest.TestCase):
         app.remove_runner.assert_not_called()
 
 
+    def test_default_disabled_provider_rejects_all_lifecycle_operations(self):
+        from tools.cloud_gateway.server import DisabledProvider
+
+        provider = DisabledProvider()
+        operations = (
+            lambda: provider.provision({"target_os": "linux"}),
+            lambda: provider.status("runner-123"),
+            lambda: provider.terminate("runner-123"),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation), self.assertRaisesRegex(
+                RuntimeError, "No provider adapter configured"
+            ):
+                operation()
+
+    def test_gateway_settings_default_to_live_provisioning_disabled(self):
+        settings = GatewaySettings()
+        self.assertFalse(settings.provisioning_enabled)
+        self.assertFalse(settings.owner_approved)
+
+
 if __name__ == "__main__":
     unittest.main()
