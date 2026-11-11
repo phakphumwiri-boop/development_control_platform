@@ -14,6 +14,8 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .sqlite_security import prepare_private_sqlite_file
 from typing import Protocol
 
 _STATES = {"provisioned", "running", "stopped", "deleted"}
@@ -109,8 +111,7 @@ class InfrastructureStore:
     def __init__(self, path="dcp-infrastructure.sqlite3"):
         self.path = str(path)
         self.lock = threading.RLock()
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite_file(self.path)
         with self.db() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS infrastructure_resources (
