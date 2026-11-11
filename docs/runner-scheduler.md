@@ -10,17 +10,15 @@ runner whose advertised capabilities and host OS match the requested target.
 
 | Job target | Required host | Additional capability |
 | --- | --- | --- |
-| `test`, `build`, `package` | Linux, Windows, or macOS | `flutter` |
-| `build_android` | Registered host OS | `android` |
-| `build_web` | Registered host OS | `web` |
+| `test` | Linux, Windows, or macOS | `flutter` |
+| `build`, `package`, `build_android` | Linux, Windows, or macOS | `android` |
+| `build_web` | Linux, Windows, or macOS | `web` |
 | `build_linux` | Linux | `linux` |
 | `build_windows` | Windows | `windows` |
 | `build_macos` | macOS | `macos` |
 | `build_ios` | macOS | `macos` and `ios` |
 
-The registry validates that a runner cannot advertise another host operating
-system. The scheduler independently enforces host matching for OS-specific
-build targets before calling the durable queue claim operation.
+The registry stores physical `host_os` separately from verified build capabilities. A Windows host without the Visual Studio C++ toolchain can still advertise Android/Web when detected, but cannot advertise Windows desktop builds. The scheduler independently enforces host matching for OS-specific targets before queue claim.
 
 ## Infrastructure boundary
 
