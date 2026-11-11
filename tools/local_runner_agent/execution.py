@@ -196,7 +196,7 @@ class FlutterBuildExecutor:
                 if os.name == "nt" else 0
             ),
         )
-        messages: queue.Queue = queue.Queue()
+        messages: queue.Queue = queue.Queue(maxsize=256)
 
         def pump(pipe, stream):
             try:
