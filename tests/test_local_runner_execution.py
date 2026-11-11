@@ -121,9 +121,9 @@ class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
         args_file = self.root / "captured Flutter args.txt"
         flutter_cmd = bin_dir / "flutter.cmd"
         flutter_cmd.write_text(
-            "@echo off\\r\\n"
-            + "echo %* > \"" + str(args_file) + "\"\\r\\n"
-            + "exit /b 0\\r\\n",
+            "@echo off\r\n"
+            + "echo %* > \"" + str(args_file) + "\"\r\n"
+            + "exit /b 0\r\n",
             encoding="utf-8",
         )
         old_path = os.environ.get("PATH", "")
