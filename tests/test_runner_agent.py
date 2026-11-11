@@ -169,14 +169,16 @@ class RunnerAgentTests(unittest.TestCase):
         process.stdout = io.StringIO("runner-safe-output\\n")
         process.returncode = 0
         process.poll.return_value = 0
-        with patch.dict(os.environ, {
-            "DCP_RUNNER_TOKEN": "runner-secret-value",
-            "DCP_GITHUB_TOKEN": "github-secret-value",
-            "GITHUB_TOKEN": "github-token-value",
-        }):
-            with patch("tools.runner_agent.agent.subprocess.Popen", return_value=process) as popen:
-                agent._run([sys.executable, "-c", "pass"], Path.cwd(),
-                           "00000000-0000-4000-8000-000000000001")
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.dict(os.environ, {
+                "DCP_RUNNER_TOKEN": "runner-secret-value",
+                "DCP_GITHUB_TOKEN": "github-secret-value",
+                "GITHUB_TOKEN": "github-token-value",
+            }):
+                with patch("tools.runner_agent.agent.subprocess.Popen", return_value=process) as popen:
+                    agent._run([sys.executable, "-c", "pass"], Path(temp),
+                               "00000000-0000-4000-8000-000000000001")
         child_env = popen.call_args.kwargs["env"]
         self.assertNotIn("DCP_RUNNER_TOKEN", child_env)
         self.assertNotIn("DCP_GITHUB_TOKEN", child_env)
