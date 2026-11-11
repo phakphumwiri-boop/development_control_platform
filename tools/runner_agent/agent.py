@@ -189,7 +189,8 @@ def build_command(target):
     return commands[target]
 
 
-def package_output(workspace: Path, target: str) -> Path | None:
+def package_output(workspace: Path, target: str, *, max_bytes: int = 100 * 1024 * 1024,
+                   max_files: int = 100_000) -> Path | None:
     if target == "test":
         return None
     candidates = {
@@ -198,22 +199,58 @@ def package_output(workspace: Path, target: str) -> Path | None:
         "build_android": [workspace / "build/app/outputs/flutter-apk/app-release.apk"],
         "build_web": [workspace / "build/web"],
         "build_linux": [workspace / "build/linux/x64/release/bundle"],
-        "build_windows": [workspace / "build/windows/x64/runner/Release"],
+        "build_windows": [
+            workspace / "build/windows/x64/runner/Release",
+            workspace / "build/windows/runner/Release",
+        ],
         "build_macos": [workspace / "build/macos/Build/Products/Release"],
         "build_ios": [workspace / "build/ios/iphoneos/Runner.app"],
     }.get(target, [])
     output = next((item for item in candidates if item.exists()), None)
-    if output is None:
-        raise RuntimeError("Expected Flutter output was not produced for " + target)
+    if output is None or output.is_symlink():
+        raise RuntimeError("Expected Flutter output is missing or unsafe for " + target)
     archive = workspace / ("dcp-" + target + ".zip")
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as bundle:
-        if output.is_dir():
-            for item in output.rglob("*"):
-                if item.is_file():
-                    bundle.write(item, item.relative_to(output.parent))
-        else:
-            bundle.write(output, output.name)
-    return archive
+    if archive.exists() or archive.is_symlink():
+        raise RuntimeError("Artifact destination already exists")
+    if output.is_file():
+        info = output.lstat()
+        if not stat.S_ISREG(info.st_mode) or not 1 <= info.st_size <= max_bytes:
+            raise RuntimeError("Flutter output file is outside allowed bounds")
+        entries = [(output, output.name)]
+    elif output.is_dir():
+        entries = []
+        total = 0
+        for current, dirs, files in os.walk(output, topdown=True, followlinks=False):
+            for dirname in list(dirs):
+                if (Path(current) / dirname).is_symlink():
+                    raise RuntimeError("Flutter output contains a symlink directory")
+            for filename in files:
+                item = Path(current) / filename
+                info = item.lstat()
+                if not stat.S_ISREG(info.st_mode):
+                    raise RuntimeError("Flutter output contains a non-regular file")
+                relative = item.relative_to(output.parent)
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise RuntimeError("Flutter output contains an unsafe path")
+                total += info.st_size
+                entries.append((item, relative.as_posix()))
+                if len(entries) > max_files or total > max_bytes:
+                    raise RuntimeError("Flutter output exceeds artifact limits")
+        if not entries:
+            raise RuntimeError("Flutter output directory is empty")
+    else:
+        raise RuntimeError("Flutter output is not a regular file or directory")
+
+    try:
+        with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+            for item, arcname in entries:
+                bundle.write(item, arcname=arcname)
+        if not 1 <= archive.stat().st_size <= max_bytes:
+            raise RuntimeError("Compressed artifact is outside allowed bounds")
+        return archive
+    except Exception:
+        archive.unlink(missing_ok=True)
+        raise
 
 
 class RunnerAgent:
