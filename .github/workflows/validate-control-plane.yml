@@ -287,15 +287,21 @@ jobs:
         shell: pwsh
         run: |
           python tests/emit_runner_bootstrap_scripts.py $env:RUNNER_TEMP
-          $tokens = $null
-          $errors = $null
-          $scriptPath = Join-Path $env:RUNNER_TEMP "dcp-windows-bootstrap.ps1"
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            $scriptPath, [ref]$tokens, [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) {
-            $errors | Format-List | Out-String | Write-Error
-            throw "Generated Windows runner bootstrap script is invalid PowerShell."
+          $scriptPaths = @(
+            (Join-Path $env:RUNNER_TEMP "dcp-windows-bootstrap.ps1"),
+            (Join-Path $env:GITHUB_WORKSPACE "Setup-DCP-Local-Runner.ps1"),
+            (Join-Path $env:GITHUB_WORKSPACE "Start-DCP-Local-Runner.ps1")
+          )
+          foreach ($scriptPath in $scriptPaths) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $scriptPath, [ref]$tokens, [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              throw "Invalid PowerShell script: $scriptPath"
+            }
           }
 
       - name: Exercise dynamic dashboard start, reuse, and stop
