@@ -43,7 +43,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         )
         self.assertEqual(actual[:3], ["cmd.exe", "/d", "/s"])
         self.assertEqual(
-            actual[3],
+            actual[4],
             '"' + subprocess.list2cmdline([executable, *command[1:]]) + '"',
         )
         self.assertEqual(
