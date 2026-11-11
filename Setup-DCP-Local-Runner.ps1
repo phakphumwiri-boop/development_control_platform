@@ -75,7 +75,7 @@ try {
     $json = ConvertTo-Json -InputObject $ordered -Compress -Depth 4
     [IO.File]::WriteAllText($tempFile, $json, [Text.UTF8Encoding]::new($false))
 
-    & icacls.exe $tempFile /inheritance:r /grant:r "$($identity):(R,W)" 'SYSTEM:(F)' 'BUILTIN\Administrators:(F)' | Out-Null
+    & icacls.exe $tempFile /inheritance:r /grant:r "$($identity):(R,W)" '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw 'Could not protect the temporary Runner credential file ACL.'
     }
