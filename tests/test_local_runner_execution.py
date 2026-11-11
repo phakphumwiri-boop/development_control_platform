@@ -63,6 +63,23 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             list(command),
         )
 
+    def test_build_environment_isolates_caches_and_preserves_android_toolchain(self):
+        with patch.dict("os.environ", {
+            "ANDROID_SDK_ROOT": "C:/Android/Sdk",
+            "JAVA_HOME": "C:/Java",
+            "SystemRoot": "C:/Windows",
+            "COMSPEC": "C:/Windows/System32/cmd.exe",
+        }, clear=True):
+            env = FlutterBuildExecutor(self.manager)._build_environment(self.workspace)
+        self.assertEqual(env["ANDROID_SDK_ROOT"], "C:/Android/Sdk")
+        self.assertEqual(env["ANDROID_HOME"], "C:/Android/Sdk")
+        self.assertEqual(env["JAVA_HOME"], "C:/Java")
+        self.assertEqual(env["SystemRoot"], "C:/Windows")
+        self.assertEqual(env["COMSPEC"], "C:/Windows/System32/cmd.exe")
+        self.assertTrue(env["PUB_CACHE"].startswith(str(self.workspace)))
+        self.assertTrue(env["GRADLE_USER_HOME"].startswith(str(self.workspace)))
+        self.assertTrue(env["TMP"].startswith(str(self.workspace)))
+
     def test_execution_is_disabled_by_default(self):
         executor = FlutterBuildExecutor(self.manager)
         with self.assertRaises(ExecutionError):
