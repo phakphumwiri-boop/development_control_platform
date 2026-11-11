@@ -176,7 +176,7 @@ def build_command(target):
     commands = {
         "test": ["flutter", "test"],
         "build": ["flutter", "build", "apk", "--release"],
-        "package": ["flutter", "build", "apk", "--release"],
+        "package": ["flutter", "build", "appbundle", "--release"],
         "build_android": ["flutter", "build", "apk", "--release"],
         "build_web": ["flutter", "build", "web", "--release"],
         "build_linux": ["flutter", "build", "linux", "--release"],
@@ -195,7 +195,7 @@ def package_output(workspace: Path, target: str, *, max_bytes: int = 100 * 1024 
         return None
     candidates = {
         "build": [workspace / "build/app/outputs/flutter-apk/app-release.apk"],
-        "package": [workspace / "build/app/outputs/flutter-apk/app-release.apk"],
+        "package": [workspace / "build/app/outputs/bundle/release/app-release.aab"],
         "build_android": [workspace / "build/app/outputs/flutter-apk/app-release.apk"],
         "build_web": [workspace / "build/web"],
         "build_linux": [workspace / "build/linux/x64/release/bundle"],
@@ -209,15 +209,15 @@ def package_output(workspace: Path, target: str, *, max_bytes: int = 100 * 1024 
     output = next((item for item in candidates if item.exists()), None)
     if output is None or output.is_symlink():
         raise RuntimeError("Expected Flutter output is missing or unsafe for " + target)
-    archive = workspace / ("dcp-" + target + ".zip")
-    if archive.exists() or archive.is_symlink():
-        raise RuntimeError("Artifact destination already exists")
     if output.is_file():
         info = output.lstat()
         if not stat.S_ISREG(info.st_mode) or not 1 <= info.st_size <= max_bytes:
             raise RuntimeError("Flutter output file is outside allowed bounds")
-        entries = [(output, output.name)]
-    elif output.is_dir():
+        return output
+    archive = workspace / ("dcp-" + target + ".zip")
+    if archive.exists() or archive.is_symlink():
+        raise RuntimeError("Artifact destination already exists")
+    if output.is_dir():
         entries = []
         total = 0
         for current, dirs, files in os.walk(output, topdown=True, followlinks=False):

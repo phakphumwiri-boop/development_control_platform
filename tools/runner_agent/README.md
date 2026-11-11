@@ -33,8 +33,8 @@ Do not run this agent on a workstation containing sensitive credentials.
   explicitly when required.
 - OS-specific jobs are rejected locally if the host OS does not match.
 - Build logs are streamed to the job; the job lease is renewed while commands run.
-- Artifact uploads use the existing lease-checked Gateway endpoint and bounded
-  Artifact Store. The Gateway validates the lease and computes SHA-256.
+- APK/AAB outputs are uploaded as their original files; directory outputs are
+  packaged as bounded ZIP files. The Gateway validates the lease and computes SHA-256.
 - This MVP does not provide OS-level sandboxing. Network isolation, ephemeral
   host reset, and least-privilege runner credentials remain deployment duties.
 
@@ -43,7 +43,7 @@ Do not run this agent on a workstation containing sensitive credentials.
 | Target | Flutter command | Artifact |
 | --- | --- | --- |
 | `test` | `flutter test` | None |
-| `build`, `package`, `build_android` | `flutter build apk --release` | APK |
+| `build`, `build_android` | `flutter build apk --release` | APK |\n| `package` | `flutter build appbundle --release` | AAB |
 | `build_web` | `flutter build web --release` | ZIP of web output |
 | `build_linux` | `flutter build linux --release` | ZIP of Linux bundle |
 | `build_windows` | `flutter build windows --release` | ZIP of Windows bundle |
