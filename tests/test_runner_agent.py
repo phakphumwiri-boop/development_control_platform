@@ -34,7 +34,7 @@ class RunnerAgentTests(unittest.TestCase):
     @patch("tools.runner_agent.agent.host_os", return_value="windows")
     def test_macos_job_is_rejected_on_windows_before_checkout(self, _host):
         client = Mock()
-        agent = RunnerAgent(client, "windows-runner", ["flutter", "windows"])
+        agent = RunnerAgent(client, "windows-runner", ["flutter", "windows"], trusted_repositories={"owner/repo"})
         with self.assertRaisesRegex(RuntimeError, "does not match"):
             agent.execute({
                 "id": "00000000-0000-4000-8000-000000000001",
@@ -55,7 +55,7 @@ class RunnerAgentTests(unittest.TestCase):
         from unittest.mock import patch
         client = Mock()
         client.heartbeat.return_value = {"state": "cancel_requested"}
-        agent = RunnerAgent(client, "runner-1", ["flutter"])
+        agent = RunnerAgent(client, "runner-1", ["flutter"], trusted_repositories={"owner/repo"})
         commit = "a" * 40
         with patch("tools.runner_agent.agent.subprocess.check_output", return_value=commit), \
              patch.object(agent, "_run"):
