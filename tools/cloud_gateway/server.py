@@ -21,6 +21,7 @@ from .service import GatewayService
 from .provider_router import ProviderRouter
 from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
+from .public_github import PublicGitHubRepositoryCatalog
 from .job_control import JobConflict, JobNotFound, JobStore
 from .artifacts import ArtifactError, ArtifactStore
 from .runner_registry import RunnerRegistry, WorkerNotFound
@@ -938,14 +939,30 @@ def main():
     if not isinstance(runner_tokens, dict):
         raise SystemExit("DCP_RUNNER_TOKENS must be a JSON object")
     github_app, _, runner_cleanup = build_github_app_runtime(settings)
+    if github_app:
+        repository_catalog = github_app.list_installation_repositories
+        repository_authorizer = lambda repository: github_app.is_repository_accessible(repository, refresh=True)
+        repository_ref_catalog = github_app.list_repository_refs
+        repository_commit_resolver = github_app.resolve_repository_commit
+        repository_project_inspector = github_app.inspect_repository_project
+    else:
+        # Local-first mode can inspect explicitly allowlisted public repositories
+        # without a GitHub App. Private repositories remain unavailable until an
+        # App installation is configured.
+        public_catalog = PublicGitHubRepositoryCatalog(settings.allowed_repositories)
+        repository_catalog = public_catalog.list_repositories
+        repository_authorizer = public_catalog.is_repository_accessible
+        repository_ref_catalog = public_catalog.list_repository_refs
+        repository_commit_resolver = public_catalog.resolve_repository_commit
+        repository_project_inspector = public_catalog.inspect_repository_project
     service = GatewayService(
         settings, store, ProviderRouter(DisabledProvider(), DisabledProvider()),
         _budget_guard_from_env(settings), runner_cleanup=runner_cleanup,
-        repository_catalog=github_app.list_installation_repositories if github_app else None,
-        repository_authorizer=(lambda repository: github_app.is_repository_accessible(repository, refresh=True)) if github_app else None,
-        repository_ref_catalog=github_app.list_repository_refs if github_app else None,
-        repository_commit_resolver=github_app.resolve_repository_commit if github_app else None,
-        repository_project_inspector=github_app.inspect_repository_project if github_app else None,
+        repository_catalog=repository_catalog,
+        repository_authorizer=repository_authorizer,
+        repository_ref_catalog=repository_ref_catalog,
+        repository_commit_resolver=repository_commit_resolver,
+        repository_project_inspector=repository_project_inspector,
     )
     service.job_store = jobs_store
     artifact_root = os.getenv("DCP_GATEWAY_ARTIFACTS_ROOT") or os.path.abspath(database_path + ".artifacts")
