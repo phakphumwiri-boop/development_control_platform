@@ -153,7 +153,7 @@ class FlutterBuildExecutor:
             )
             for name in host_path_variables:
                 value = inherited.get(name)
-                if isinstance(value, str) and value and "\\0" not in value:
+                if isinstance(value, str) and value and "\\x00" not in value:
                     env[name] = value
 
             # Preflight also recognizes the standard per-user Android SDK location.
