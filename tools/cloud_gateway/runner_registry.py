@@ -77,8 +77,9 @@ class RunnerRegistry:
             raise ValueError("unsupported Runner capability")
         if len(set(capabilities)) != len(capabilities) or "flutter" not in capabilities:
             raise ValueError("capabilities must be unique and include flutter")
-        if host_os not in capabilities:
-            raise ValueError("capabilities must include the Runner host OS")
+        # Host identity is stored separately from verified build capabilities.
+        # A Windows host without Visual Studio may still build Android/Web, but
+        # must not advertise the Windows desktop target.
         if any(item in capabilities and item != host_os for item in _OS):
             raise ValueError("Runner cannot claim another host operating system capability")
 
@@ -152,7 +153,7 @@ class RunnerRegistry:
         caps = set(worker["capabilities"])
         targets = []
         if "flutter" in caps:
-            targets.extend(("test", "build", "package"))
+            targets.append("test")
         if "android" in caps:
             targets.extend(("build", "build_android", "package"))
         if "web" in caps:
