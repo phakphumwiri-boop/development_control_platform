@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .sqlite_security import prepare_private_sqlite_file
+
 
 _WORKER = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
 _OS = {"linux", "windows", "macos"}
@@ -34,8 +36,7 @@ class RunnerRegistry:
         if isinstance(stale_after_seconds, bool) or not isinstance(stale_after_seconds, int) or not 15 <= stale_after_seconds <= 3600:
             raise ValueError("stale_after_seconds must be between 15 and 3600")
         self.path = str(path)
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite_file(self.path)
         self.stale_after_seconds = stale_after_seconds
         self.lock = threading.RLock()
         with self.db() as conn:
