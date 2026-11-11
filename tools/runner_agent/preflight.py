@@ -91,7 +91,11 @@ def _visual_studio() -> dict:
         return {"installed": False, "version": None}
     try:
         result = subprocess.run(
-            [str(executable), "-latest", "-property", "installationVersion"],
+            [
+                str(executable), "-latest", "-products", "*",
+                "-requires", "Microsoft.VisualStudio.Workload.NativeDesktop",
+                "-property", "installationVersion",
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -102,7 +106,9 @@ def _visual_studio() -> dict:
         version = result.stdout.strip() or None
     except (OSError, subprocess.TimeoutExpired):
         version = None
-    return {"installed": True, "version": version}
+    # The Visual Studio IDE alone is insufficient; Flutter Windows builds
+    # require the Desktop development with C++ workload.
+    return {"installed": bool(version), "version": version}
 
 
 def collect_preflight() -> dict:
