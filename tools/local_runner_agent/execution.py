@@ -107,6 +107,69 @@ class FlutterBuildExecutor:
         )
 
     @staticmethod
+    def _execution_environment(workspace: Path, *, environ=None,
+                               windows: bool | None = None) -> dict[str, str]:
+        """Build an isolated environment while preserving required host toolchain paths.
+
+        Never forward arbitrary environment variables (which may contain tokens).
+        Windows Flutter/Android builds need OS variables and SDK/Visual Studio paths;
+        user-writable caches and temporary files remain inside the job workspace.
+        """
+        inherited = os.environ if environ is None else environ
+        is_windows = os.name == "nt" if windows is None else windows
+        home = workspace / ".runner-home"
+        pub_cache = workspace / ".pub-cache"
+        temp = workspace / ".tmp"
+        app_data = workspace / ".appdata"
+        local_app_data = workspace / ".localappdata"
+        for directory in (home, pub_cache, temp, app_data, local_app_data):
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+        env = {
+            "PATH": inherited.get("PATH", ""),
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "PUB_CACHE": str(pub_cache),
+            "CI": "true",
+            "FLUTTER_SUPPRESS_ANALYTICS": "true",
+            "GIT_TERMINAL_PROMPT": "0",
+            "LANG": "C.UTF-8",
+        }
+        if is_windows:
+            env.update({
+                "TEMP": str(temp),
+                "TMP": str(temp),
+                "APPDATA": str(app_data),
+                "LOCALAPPDATA": str(local_app_data),
+            })
+            host_path_variables = (
+                "SystemRoot", "WINDIR", "SystemDrive", "COMSPEC", "PATHEXT",
+                "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
+                "ANDROID_HOME", "ANDROID_SDK_ROOT", "JAVA_HOME", "FLUTTER_ROOT",
+                "VSINSTALLDIR", "VCINSTALLDIR", "VCToolsInstallDir",
+                "WindowsSdkDir", "WindowsSDKVersion", "VisualStudioVersion",
+                "VSCMD_VER", "VSCMD_ARG_TGT_ARCH", "VSCMD_ARG_HOST_ARCH",
+                "INCLUDE", "LIB", "LIBPATH",
+            )
+            for name in host_path_variables:
+                value = inherited.get(name)
+                if isinstance(value, str) and value and "\\0" not in value:
+                    env[name] = value
+
+            # Preflight also recognizes the standard per-user Android SDK location.
+            # Preserve that SDK explicitly because LOCALAPPDATA is isolated above.
+            if not env.get("ANDROID_SDK_ROOT") and not env.get("ANDROID_HOME"):
+                inherited_local = inherited.get("LOCALAPPDATA")
+                if isinstance(inherited_local, str) and inherited_local:
+                    default_sdk = Path(inherited_local) / "Android" / "Sdk"
+                    if default_sdk.is_dir():
+                        env["ANDROID_SDK_ROOT"] = str(default_sdk)
+                        env["ANDROID_HOME"] = str(default_sdk)
+        else:
+            env["TMPDIR"] = str(temp)
+        return env
+
+    @staticmethod
     def _terminate_tree(process: subprocess.Popen) -> None:
         if os.name == "nt":
             taskkill = shutil.which("taskkill")
@@ -159,18 +222,7 @@ class FlutterBuildExecutor:
             raise ExecutionError("Flutter SDK executable is not available on PATH")
         self.workspaces.check_quota(job_id, worker_id)
 
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": str(workspace / ".runner-home"),
-            "USERPROFILE": str(workspace / ".runner-home"),
-            "PUB_CACHE": str(workspace / ".pub-cache"),
-            "CI": "true",
-            "FLUTTER_SUPPRESS_ANALYTICS": "true",
-            "GIT_TERMINAL_PROMPT": "0",
-            "LANG": "C.UTF-8",
-        }
-        Path(env["HOME"]).mkdir(mode=0o700, exist_ok=True)
-        Path(env["PUB_CACHE"]).mkdir(mode=0o700, exist_ok=True)
+        env = self._execution_environment(workspace)
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         started = time.monotonic()
         process = subprocess.Popen(
