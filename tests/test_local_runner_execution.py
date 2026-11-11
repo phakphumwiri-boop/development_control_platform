@@ -45,7 +45,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         self.assertIsInstance(actual, str)
         expected = (
             subprocess.list2cmdline([
-                os.environ.get("COMSPEC") or str(Path(os.environ.get("SystemRoot", r"C:\\Windows")) / "System32" / "cmd.exe")
+                os.environ.get("COMSPEC") or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe")
             ])
             + " /d /s /c "
             + '"' + subprocess.list2cmdline([executable, *command[1:]]) + '"'
