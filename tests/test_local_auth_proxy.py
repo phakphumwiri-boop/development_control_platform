@@ -456,7 +456,7 @@ class LocalRunnerCredentialFileTests(unittest.TestCase):
                 link.symlink_to(actual)
             except (OSError, NotImplementedError):
                 self.skipTest("Symlink creation is not available on this host")
-            with self.assertRaisesRegex(SystemExit, "non-symlink"):
+            with self.assertRaisesRegex(SystemExit, "symlink"):
                 auth.load_runner_tokens(link)
 
     def test_rejects_oversized_runner_credential_file(self):
