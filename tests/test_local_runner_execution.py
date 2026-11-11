@@ -102,6 +102,34 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         )
 
     @unittest.skipIf(os.name == "nt", "POSIX fixture executable used for deterministic process tests")
+    def test_dependency_resolution_failure_prevents_target_execution(self):
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        calls_file = self.root / "flutter-calls.txt"
+        flutter = bin_dir / "flutter"
+        flutter.write_text(
+            "#!/bin/sh\\n"
+            + "printf '%s\\\\n' \"$*\" >> '" + str(calls_file) + "'\\n"
+            + "if [ \"$1\" = \"pub\" ]; then exit 7; fi\\n"
+            + "exit 0\\n"
+        )
+        flutter.chmod(0o700)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
+        try:
+            executor = FlutterBuildExecutor(self.manager, enabled=True, timeout_seconds=10)
+            result = executor.run(self.job_id, self.worker, "test")
+        finally:
+            os.environ["PATH"] = old_path
+        self.assertEqual(result.outcome, "failed")
+        self.assertEqual(result.error_code, "DEPENDENCY_RESOLUTION_FAILED")
+        self.assertEqual(result.return_code, 7)
+        self.assertEqual(
+            calls_file.read_text(encoding="utf-8").splitlines(),
+            ["pub get --enforce-lockfile"],
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX fixture executable used for deterministic process tests")
     def test_timeout_terminates_process_group(self):
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
