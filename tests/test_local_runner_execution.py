@@ -62,6 +62,41 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             list(command),
         )
 
+    def test_windows_environment_preserves_sdk_paths_but_not_secrets(self):
+        local_app_data = self.root / "original-user-local-appdata"
+        sdk = local_app_data / "Android" / "Sdk"
+        sdk.mkdir(parents=True)
+        inherited = {
+            "PATH": "C:\\Flutter\\bin;C:\\Windows\\System32",
+            "SystemRoot": "C:\\Windows",
+            "WINDIR": "C:\\Windows",
+            "SystemDrive": "C:",
+            "COMSPEC": "C:\\Windows\\System32\\cmd.exe",
+            "PATHEXT": ".COM;.EXE;.BAT;.CMD",
+            "LOCALAPPDATA": str(local_app_data),
+            "APPDATA": "C:\\Users\\Owner\\AppData\\Roaming",
+            "JAVA_HOME": "C:\\Java\\jdk",
+            "DCP_RUNNER_TOKEN": "must-not-be-forwarded",
+            "GITHUB_TOKEN": "must-not-be-forwarded",
+        }
+        env = FlutterBuildExecutor._execution_environment(
+            self.workspace, environ=inherited, windows=True
+        )
+        self.assertEqual(env["PATH"], inherited["PATH"])
+        self.assertEqual(env["SystemRoot"], inherited["SystemRoot"])
+        self.assertEqual(env["COMSPEC"], inherited["COMSPEC"])
+        self.assertEqual(env["JAVA_HOME"], inherited["JAVA_HOME"])
+        self.assertEqual(env["ANDROID_HOME"], str(sdk))
+        self.assertEqual(env["ANDROID_SDK_ROOT"], str(sdk))
+        self.assertNotEqual(env["LOCALAPPDATA"], inherited["LOCALAPPDATA"])
+        self.assertNotEqual(env["APPDATA"], inherited["APPDATA"])
+        self.assertTrue(Path(env["LOCALAPPDATA"]).is_dir())
+        self.assertTrue(Path(env["APPDATA"]).is_dir())
+        self.assertTrue(Path(env["TEMP"]).is_dir())
+        self.assertTrue(Path(env["TMP"]).is_dir())
+        self.assertNotIn("DCP_RUNNER_TOKEN", env)
+        self.assertNotIn("GITHUB_TOKEN", env)
+
     def test_execution_is_disabled_by_default(self):
         executor = FlutterBuildExecutor(self.manager)
         with self.assertRaises(ExecutionError):
