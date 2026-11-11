@@ -98,7 +98,7 @@ class FlutterBuildExecutor:
             return list(command)
         command_line = subprocess.list2cmdline([resolved, *command[1:]])
         command_processor = os.environ.get("COMSPEC") or str(
-            Path(os.environ.get("SystemRoot", r"C:\\Windows")) / "System32" / "cmd.exe"
+            Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
         )
         return (
             subprocess.list2cmdline([command_processor])
