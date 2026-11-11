@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('^[A-Za-z0-9_.:-]{1,100}$')]
+    [ValidatePattern('^[a-z0-9_.:-]{1,100}$')]
     [string]$WorkerId = 'windows-local-01',
     [switch]$EnableExecution,
     [switch]$Once,
