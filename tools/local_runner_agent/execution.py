@@ -168,7 +168,7 @@ class FlutterBuildExecutor:
             if value:
                 env[name] = value
         sdk_root = env.get("ANDROID_SDK_ROOT") or env.get("ANDROID_HOME")
-        if not sdk_root and env.get("LOCALAPPDATA"):
+        if os.name == "nt" and not sdk_root and env.get("LOCALAPPDATA"):
             candidate = Path(env["LOCALAPPDATA"]) / "Android" / "Sdk"
             if candidate.is_dir():
                 sdk_root = str(candidate)
