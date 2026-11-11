@@ -15,8 +15,8 @@ $credentialFile = Join-Path $dataDir 'runner-tokens.json'
 $tokenMap = @{}
 $workerPattern = '^[a-z0-9_.:-]{1,100}$'
 
-if (Test-Path -LiteralPath $credentialFile) {
-    $existingItem = Get-Item -LiteralPath $credentialFile -Force
+ $existingItem = Get-Item -LiteralPath $credentialFile -Force -ErrorAction SilentlyContinue
+if ($null -ne $existingItem) {
     $isReparsePoint = (($existingItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)
     if ($isReparsePoint -or $existingItem.PSIsContainer) {
         throw 'Existing Runner credential path is not a regular file.'
