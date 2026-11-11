@@ -372,6 +372,8 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
         self.assertIn("ยังไม่มีการกู้คืนผ่านอีเมล", html)
         self.assertNotIn(self.token, html)
         self.assertNotIn(self.secret, html)
+        self.assertIn("/api/recon", html)
+        self.assertNotIn("https://api.github.com", html)
 
 
 
