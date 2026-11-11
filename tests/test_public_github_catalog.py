@@ -72,12 +72,11 @@ class PublicGitHubRepositoryCatalogTests(unittest.TestCase):
     def test_inspects_flutter_project_from_bounded_git_tree_and_pubspec(self):
         commit_sha = "c" * 40
         tree_sha = "d" * 40
-        pubspec = (
-            "name: sample_app\n"
-            "dependencies:\n"
-            "  flutter:\n"
-            "    sdk: flutter\n"
-        )
+        pubspec = """name: sample_app
+dependencies:
+  flutter:
+    sdk: flutter
+"""
         encoded = base64.b64encode(pubspec.encode("utf-8")).decode("ascii")
         self.catalog._request = Mock(side_effect=[
             {"sha": commit_sha, "commit": {"tree": {"sha": tree_sha}}},
