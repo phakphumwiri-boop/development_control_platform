@@ -23,13 +23,27 @@ The owner password is stored as a salted PBKDF2-HMAC-SHA256 hash in `%LOCALAPPDA
 ## Local service layout
 
 - Dashboard + Auth Proxy: `127.0.0.1:8789`
-- Gateway: `127.0.0.1:8790`
+- Gateway: `127.0.0.1:18790`
 - SQLite data: `%LOCALAPPDATA%\DCP\gateway.sqlite3`
 - Owner credential hash: `%LOCALAPPDATA%\DCP\owner-auth.json`
 
 The Auth Proxy serves the Dashboard, validates the owner password, manages sessions and CSRF, then signs short-lived HMAC identity assertions when forwarding allowlisted API requests to the Gateway. The Gateway independently verifies the signature and replay nonce. The API token and HMAC secret are never exposed to browser JavaScript.
 
 This is an HTTP service bound exclusively to loopback. Do not change the bind address to `0.0.0.0`, expose the ports to the LAN/internet, or use it as a remote multi-user login service. The cookie is HttpOnly and SameSite=Strict; loopback HTTP is used because this stack is local-only and does not configure a local TLS certificate.
+
+## Recon Back Box integration
+
+The Recon Back Box is served at `/recon-back-box/` from the same local Dashboard origin.
+Its read-only source data is the public `phakphum12345/Drive-letter` repository. The browser
+calls only the authenticated same-origin `/api/recon/*` endpoints; the Local Auth Proxy
+forwards those requests to the local Gateway, which fetches a fixed allowlist of public
+GitHub metadata and the four versioned JSON configs from `main`. No GitHub token is
+stored in the browser or local stack.
+
+The local integration requires an authenticated DCP Owner session. Recon source access is
+read-only: exported config edits are review material and are not pushed to GitHub. The
+Drive-letter connection must not be treated as a durable write path unless a separately
+approved GitHub App integration with repository write permission is configured.
 
 ## Stop
 

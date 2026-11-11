@@ -373,6 +373,39 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
         self.assertNotIn(self.token, html)
         self.assertNotIn(self.secret, html)
 
+        with urlopen(self.base + "/recon-back-box/", timeout=3) as response:
+            recon_html = response.read().decode("utf-8")
+            self.assertEqual(response.status, 200)
+        self.assertIn("Recon Back Box", recon_html)
+        self.assertIn("/api/recon", recon_html)
+        self.assertNotIn("https://api.github.com", recon_html)
+
+
+
+    def test_recon_reads_require_owner_session_and_use_gateway_proxy(self):
+        self.cookie_jar.clear()
+        denied, _, _ = self.request("/api/recon/repository")
+        self.assertEqual(denied, 401)
+
+        _, _, preauth_body = self.request("/api/auth/session")
+        csrf = json.loads(preauth_body)["csrfToken"]
+        logged_in, _, _ = self.request(
+            "/api/auth/login",
+            "POST",
+            {"username": "owner-test", "password": "correct horse battery staple 2026!"},
+            csrf,
+        )
+        self.assertEqual(logged_in, 200)
+
+        payload = b'{"full_name":"phakphum12345/Drive-letter","private":false}'
+        with patch.object(self.app, "gateway_request", return_value=(200, payload)) as gateway_call:
+            status, _, body = self.request("/api/recon/repository")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["full_name"], "phakphum12345/Drive-letter")
+        self.assertEqual(gateway_call.call_args.args[0:2], ("GET", "/api/recon/repository"))
+
+        unknown, _, _ = self.request("/api/not-allowlisted")
+        self.assertEqual(unknown, 404)
 
 
 class LocalRunnerCredentialFileTests(unittest.TestCase):

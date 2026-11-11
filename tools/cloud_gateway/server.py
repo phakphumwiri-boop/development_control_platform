@@ -27,6 +27,7 @@ from .runner_registry import RunnerRegistry, WorkerNotFound
 from .scheduler import RunnerScheduler, RunnerNotEligible, RunnerNotRegistered
 from .infrastructure import (FakeInfrastructureProvider, InfrastructureManager,
                              InfrastructureStore, ProviderUnavailable, ResourceNotFound)
+from .recon_api import ReconAPIError, fetch_recon_resource
 
 
 class DisabledProvider:
@@ -229,6 +230,19 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def do_GET(self):
             path = urlparse(self.path).path
+            if path.startswith("/api/recon/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated session required"})
+                if identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(403, {"error": "dashboard role required"})
+                try:
+                    payload = fetch_recon_resource(path)
+                except ReconAPIError as exc:
+                    return self.send_json(exc.status, {"error": exc.public_message})
+                except Exception:
+                    return self.send_json(502, {"error": "Recon source service unavailable"})
+                return self.send_json(200, payload)
             if path == "/healthz":
                 return self.send_json(200, {
                     "status": "ok",
