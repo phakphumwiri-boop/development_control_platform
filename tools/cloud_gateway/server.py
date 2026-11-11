@@ -16,7 +16,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .policy import GatewaySettings, PolicyDenied
+from .policy import GatewaySettings, PolicyDenied, valid_repository_name
 from .service import GatewayService
 from .provider_router import ProviderRouter
 from .store import LifecycleConflict, RunnerStore
@@ -371,7 +371,7 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     if len(parts) not in (3, 4):
                         return self.send_json(404, {"error": "not found"})
                     repository = unquote(parts[0]) + "/" + unquote(parts[1])
-                    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository):
+                    if not valid_repository_name(repository):
                         return self.send_json(400, {"error": "invalid repository"})
                     if len(parts) == 4 and parts[2] == "projects":
                         commit_sha = unquote(parts[3])
