@@ -163,6 +163,22 @@ class RunnerAgentTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     GatewayClient(url, token)
 
+    def test_runner_agent_rejects_dot_segment_repository_names(self):
+        client = Mock()
+        agent = RunnerAgent(
+            client, "runner-1", ["flutter"],
+            trusted_repositories={"owner/repo", "../repo", "owner/.."},
+        )
+        for repository in ("../repo", "owner/..", "./repo", "owner/."):
+            with self.subTest(repository=repository):
+                with self.assertRaises(ValueError):
+                    agent.execute({
+                        "id": "00000000-0000-4000-8000-000000000001",
+                        "target": "test", "repository": repository,
+                        "commit_sha": "a" * 40,
+                    })
+        client.log.assert_not_called()
+
     def test_runner_agent_rejects_untrusted_repository_before_checkout(self):
         client = Mock()
         agent = RunnerAgent(client, "runner-1", ["flutter"])
