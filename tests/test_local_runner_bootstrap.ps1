@@ -33,7 +33,7 @@ try {
     & $setup -WorkerId 'ci-runner-02'
     if (-not $?) { throw 'Local Runner second-worker setup failed.' }
     $thirdMap = Get-Content -LiteralPath $credentialFile -Raw | ConvertFrom-Json
-    if ($thirdMap.PSObject.Properties.Count -ne 2) {
+    if (@($thirdMap.PSObject.Properties).Count -ne 2) {
         throw 'Expected exactly two configured Runner workers.'
     }
     if ($thirdMap.'ci-runner-02' -ceq $firstToken) {
