@@ -254,43 +254,70 @@ def package_output(workspace: Path, target: str, *, max_bytes: int = 100 * 1024 
 
 
 class RunnerAgent:
-    def __init__(self, client, worker_id, capabilities, lease_seconds=120, command_timeout=3600):
+    def __init__(self, client, worker_id, capabilities, lease_seconds=120,
+                 command_timeout=3600, trusted_repositories=()):
         self.client = client
         self.worker_id = worker_id
-        self.capabilities = sorted(set(capabilities))
+        self.capabilities = frozenset(capabilities)
         self.lease_seconds = lease_seconds
         self.command_timeout = command_timeout
+        self.trusted_repositories = frozenset(trusted_repositories)
 
     def execute(self, job):
         job_id = job["id"]
+        GatewayClient._validate_job_id(job_id)
         target = job["target"]
         if target not in self.client_targets:
             raise ValueError("unsupported target")
+        repository = job["repository"]
+        commit = job["commit_sha"]
+        if not isinstance(repository, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository
+        ):
+            raise ValueError("invalid GitHub repository")
+        if repository not in self.trusted_repositories:
+            raise RuntimeError("repository is not in the Runner trusted-repository allowlist")
+        if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise ValueError("invalid immutable commit SHA")
+
+        required_capabilities = {
+            "test": {"flutter"},
+            "build": {"android"},
+            "package": {"android"},
+            "build_android": {"android"},
+            "build_web": {"web"},
+            "build_linux": {"linux"},
+            "build_windows": {"windows"},
+            "build_macos": {"macos"},
+            "build_ios": {"macos", "ios"},
+        }[target]
+        if not required_capabilities.issubset(self.capabilities):
+            raise RuntimeError("Runner does not advertise the required build capabilities")
         required_os = {
             "build_linux": "linux", "build_windows": "windows",
             "build_macos": "macos", "build_ios": "macos",
         }.get(target)
         if required_os and host_os() != required_os:
             raise RuntimeError("Job target does not match this Runner host")
+
         self.client.log(job_id, "Runner accepted pinned job " + job_id, "system")
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="dcp-job-") as temp:
             workspace = Path(temp) / "workspace"
-            repository = job["repository"]
-            commit = job["commit_sha"]
             remote = "https://github.com/" + repository + ".git"
             self._run(["git", "clone", "--no-checkout", "--depth", "1", remote, str(workspace)], Path(temp), job_id)
             self._run(["git", "-C", str(workspace), "fetch", "--depth", "1", "origin", commit], Path(temp), job_id)
             self._run(["git", "-C", str(workspace), "checkout", "--detach", commit], Path(temp), job_id)
             actual = subprocess.check_output(
-                ["git", "-C", str(workspace), "rev-parse", "HEAD"], text=True, timeout=15
+                ["git", "-C", str(workspace), "rev-parse", "HEAD"],
+                text=True, encoding="utf-8", errors="replace", timeout=15,
+                env=FlutterBuildExecutor._execution_environment(workspace),
+                shell=False,
             ).strip()
             if actual != commit:
                 raise RuntimeError("Checked-out commit SHA does not match requested immutable SHA")
             self._run(["flutter", "pub", "get"], workspace, job_id)
             self._run(build_command(target), workspace, job_id)
-            # A cancellation can arrive after the final build command has exited.
-            # Re-check the lease before publishing an artifact or reporting success.
             heartbeat = self.client.heartbeat(job_id, self.lease_seconds)
             if heartbeat.get("state") == "cancel_requested":
                 raise JobCancelled("Job cancellation was requested")
@@ -304,9 +331,6 @@ class RunnerAgent:
             try:
                 self.client.finish(job_id, "succeeded", result)
             except GatewayError:
-                # Close the race where cancellation lands between the last
-                # heartbeat and finish(succeeded). The Gateway correctly rejects
-                # success for cancel_requested jobs; acknowledge cancellation.
                 heartbeat = self.client.heartbeat(job_id, self.lease_seconds)
                 if heartbeat.get("state") == "cancel_requested":
                     raise JobCancelled("Job cancellation was requested")
@@ -322,34 +346,47 @@ class RunnerAgent:
 
     def _run(self, command, cwd, job_id):
         self.client.log(job_id, "Executing: " + " ".join(command), "system")
+        env = FlutterBuildExecutor._execution_environment(Path(cwd))
+        process_command = FlutterBuildExecutor._process_command(tuple(command))
         process = subprocess.Popen(
-            command, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, errors="replace", shell=False, bufsize=1,
+            process_command, cwd=str(cwd), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", shell=False,
+            bufsize=1, close_fds=True,
+            start_new_session=(os.name != "nt"),
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
         )
-        output_queue = queue.Queue()
+        output_queue = queue.Queue(maxsize=256)
+
         def collect_output():
             try:
                 for output_line in process.stdout:
                     output_queue.put(output_line)
             finally:
                 output_queue.put(None)
+
         reader = threading.Thread(target=collect_output, daemon=True)
         reader.start()
         deadline = time.monotonic() + self.command_timeout
         last_heartbeat = time.monotonic()
         lines = []
         buffered_chars = 0
+        total_output_bytes = 0
         stream_closed = False
         try:
             while process.poll() is None or not stream_closed:
                 if time.monotonic() >= deadline:
-                    process.kill()
+                    FlutterBuildExecutor._terminate_tree(process)
                     raise TimeoutError("Runner command exceeded configured timeout")
                 try:
                     line = output_queue.get(timeout=1)
                     if line is None:
                         stream_closed = True
                     else:
+                        total_output_bytes += len(line.encode("utf-8", errors="replace"))
+                        if total_output_bytes > 5 * 1024 * 1024:
+                            FlutterBuildExecutor._terminate_tree(process)
+                            raise RuntimeError("Runner command output exceeded its 5 MiB limit")
                         lines.append(line)
                         buffered_chars += len(line)
                         if buffered_chars >= 7000:
@@ -362,23 +399,19 @@ class RunnerAgent:
                     heartbeat = self.client.heartbeat(job_id, self.lease_seconds)
                     last_heartbeat = time.monotonic()
                     if heartbeat.get("state") == "cancel_requested":
-                        process.terminate()
-                        try:
-                            process.wait(timeout=10)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        FlutterBuildExecutor._terminate_tree(process)
                         raise JobCancelled("Job cancellation was requested")
             if lines:
                 self.client.log(job_id, "".join(lines)[-7500:])
             reader.join(timeout=2)
             if process.returncode:
-                raise RuntimeError("Command failed with exit code %s: %s" % (process.returncode, command[0]))
+                raise RuntimeError("Runner command failed with exit code %s" % process.returncode)
         finally:
             if process.poll() is None:
-                process.kill()
-                process.wait()
+                FlutterBuildExecutor._terminate_tree(process)
             reader.join(timeout=2)
+            if process.stdout and not process.stdout.closed:
+                process.stdout.close()
 
 
 def main(argv=None):
