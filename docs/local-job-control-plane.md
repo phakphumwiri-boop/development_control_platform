@@ -130,6 +130,8 @@ The command processes no more than one queued job. The host must have the Flutte
 
 The local Windows stack can provision a dedicated Runner credential without placing the token in source control or printing it to the console.
 
+The DCP control-plane repository itself does not contain a Flutter `pubspec.yaml`; select a separate repository that actually contains the Flutter application to be built. The local public catalog reports project type and target readiness before job creation.
+
 1. Run `Setup-DCP-Local-Runner.cmd -TrustedRepository "owner/repository"` for each public Flutter repository the local Gateway may build. It creates/reuses a worker credential in `%LOCALAPPDATA%\DCP\runner-tokens.json` and writes the repository allowlist to `gateway-local-settings.json`; both files receive a current-user/SYSTEM/Administrators Windows ACL, and no token is displayed.
 2. Stop the existing DCP stack with Ctrl+C in its stack PowerShell window, then restart it with `Start-DCP-Local.cmd`. The Local Auth Proxy loads the protected credential map into the Gateway process at startup.
    Without a GitHub App installation, the local Gateway exposes only these explicitly allowlisted **public** repositories through the read-only GitHub REST API. Private repositories require a configured GitHub App installation.
