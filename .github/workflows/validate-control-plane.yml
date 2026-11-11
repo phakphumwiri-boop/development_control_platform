@@ -277,6 +277,9 @@ jobs:
       - name: Exercise Windows Flutter batch shim with real cmd.exe
         run: python -m unittest tests.test_local_runner_execution.WindowsFlutterBatchShimAcceptanceTests -v
 
+      - name: Exercise Windows Runner job-to-artifact pipeline through real cmd.exe
+        run: python -m unittest tests.test_local_runner_pipeline_e2e.WindowsRunnerPipelineAcceptanceTests -v
+
       - name: Parse generated Windows runner bootstrap PowerShell
         shell: pwsh
         run: |
