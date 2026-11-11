@@ -96,7 +96,8 @@ if ($null -ne $existingSettingsItem) {
     }
     $settingsFileExists = $true
     foreach ($repository in @($existingSettings.allowed_repositories)) {
-        if ($repository -isnot [string] -or $repository -notmatch $repositoryPattern) {
+        if ($repository -isnot [string] -or $repository -notmatch $repositoryPattern -or
+            @($repository.Split('/')) -contains '.' -or @($repository.Split('/')) -contains '..') {
             throw 'Existing local Gateway allowlist contains an invalid repository.'
         }
         if ($allowedRepositoryMap.ContainsKey($repository)) {
@@ -110,7 +111,8 @@ if ($null -ne $existingSettingsItem) {
 }
 
 foreach ($repository in $TrustedRepository) {
-    if ($repository -notmatch $repositoryPattern) {
+    if ($repository -notmatch $repositoryPattern -or
+        @($repository.Split('/')) -contains '.' -or @($repository.Split('/')) -contains '..') {
         throw "Invalid trusted repository name: $repository"
     }
     $matchingKey = @($allowedRepositoryMap.Keys | Where-Object { $_ -ieq $repository })
