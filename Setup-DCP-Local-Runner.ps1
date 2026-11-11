@@ -96,6 +96,9 @@ if ($null -ne $existingSettingsItem) {
         if ($repository -isnot [string] -or $repository -notmatch $repositoryPattern) {
             throw 'Existing local Gateway allowlist contains an invalid repository.'
         }
+        if ($allowedRepositoryMap.ContainsKey($repository)) {
+            throw 'Existing local Gateway allowlist contains duplicate repository names.'
+        }
         $allowedRepositoryMap[$repository] = $repository
     }
 }
@@ -103,6 +106,10 @@ if ($null -ne $existingSettingsItem) {
 foreach ($repository in $TrustedRepository) {
     if ($repository -notmatch $repositoryPattern) {
         throw "Invalid trusted repository name: $repository"
+    }
+    $matchingKey = @($allowedRepositoryMap.Keys | Where-Object { $_ -ieq $repository })
+    if ($matchingKey.Count -gt 0 -and $matchingKey[0] -cne $repository) {
+        throw 'Trusted repository name casing must match the existing Gateway allowlist exactly.'
     }
     $allowedRepositoryMap[$repository] = $repository
 }
