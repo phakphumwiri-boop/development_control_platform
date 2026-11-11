@@ -82,6 +82,22 @@ class FlutterBuildExecutor:
         return ("flutter", *_COMMANDS[target])
 
     @staticmethod
+    def _process_command(command: tuple[str, ...], *, windows: bool | None = None,
+                         executable: str | None = None) -> list[str]:
+        """Resolve Flutter's Windows .bat shim through cmd.exe without enabling shell=True.
+
+        Python cannot launch .bat/.cmd files directly with shell=False. The command
+        itself remains the fixed target allowlist; list2cmdline handles Windows
+        argument quoting and the executable path is resolved by shutil.which.
+        """
+        is_windows = os.name == "nt" if windows is None else windows
+        resolved = executable or shutil.which(command[0])
+        if not is_windows or not resolved or Path(resolved).suffix.lower() not in (".bat", ".cmd"):
+            return list(command)
+        command_line = subprocess.list2cmdline([resolved, *command[1:]])
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", f'"{command_line}"']
+
+    @staticmethod
     def _terminate_tree(process: subprocess.Popen) -> None:
         if os.name == "nt":
             taskkill = shutil.which("taskkill")
@@ -149,7 +165,7 @@ class FlutterBuildExecutor:
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
         started = time.monotonic()
         process = subprocess.Popen(
-            list(command), cwd=str(project_root), env=env,
+            self._process_command(command), cwd=str(project_root), env=env,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             shell=False, close_fds=True, start_new_session=(os.name != "nt"),
             creationflags=creationflags,

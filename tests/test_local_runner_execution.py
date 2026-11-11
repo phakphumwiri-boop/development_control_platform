@@ -1,5 +1,6 @@
 """Tests for the policy-gated Flutter build executor."""
 import os
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -33,6 +34,28 @@ class FlutterBuildExecutorTests(unittest.TestCase):
                          ("flutter", "build", "ios", "--release", "--no-codesign", "--no-pub"))
         with self.assertRaises(ExecutionError):
             FlutterBuildExecutor.command_for("bash -c whoami")
+
+    def test_windows_flutter_batch_shim_uses_quoted_cmd_wrapper(self):
+        command = ("flutter", "build", "apk", "--release", "--no-pub")
+        executable = r"C:\Program Files\Flutter SDK\bin\flutter.bat"
+        actual = FlutterBuildExecutor._process_command(
+            command, windows=True, executable=executable
+        )
+        self.assertEqual(actual[:3], ["cmd.exe", "/d", "/s"])
+        self.assertEqual(
+            actual[4],
+            '"' + subprocess.list2cmdline([executable, *command[1:]]) + '"',
+        )
+        self.assertEqual(
+            FlutterBuildExecutor._process_command(
+                command, windows=True, executable=r"C:\Flutter\bin\flutter.exe"
+            ),
+            list(command),
+        )
+        self.assertEqual(
+            FlutterBuildExecutor._process_command(command, windows=False, executable=executable),
+            list(command),
+        )
 
     def test_execution_is_disabled_by_default(self):
         executor = FlutterBuildExecutor(self.manager)
