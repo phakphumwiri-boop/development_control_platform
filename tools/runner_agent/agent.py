@@ -280,6 +280,12 @@ class RunnerAgent:
         if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError("invalid immutable commit SHA")
 
+        required_os = {
+            "build_linux": "linux", "build_windows": "windows",
+            "build_macos": "macos", "build_ios": "macos",
+        }.get(target)
+        if required_os and host_os() != required_os:
+            raise RuntimeError("Job target does not match this Runner host")
         required_capabilities = {
             "test": {"flutter"},
             "build": {"android"},
@@ -293,12 +299,6 @@ class RunnerAgent:
         }[target]
         if not required_capabilities.issubset(self.capabilities):
             raise RuntimeError("Runner does not advertise the required build capabilities")
-        required_os = {
-            "build_linux": "linux", "build_windows": "windows",
-            "build_macos": "macos", "build_ios": "macos",
-        }.get(target)
-        if required_os and host_os() != required_os:
-            raise RuntimeError("Job target does not match this Runner host")
 
         self.client.log(job_id, "Runner accepted pinned job " + job_id, "system")
         started = time.monotonic()
