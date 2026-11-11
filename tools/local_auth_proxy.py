@@ -108,6 +108,7 @@ def load_gateway_local_settings(path: Path | None = None) -> dict:
         if (
             not isinstance(repository, str)
             or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository)
+            or any(part in (".", "..") for part in repository.split("/"))
             or repository.lower() in seen
         ):
             raise SystemExit("Local Gateway repository allowlist contains an invalid or duplicate entry")
