@@ -11,7 +11,7 @@ New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $env:LOCALAPPDATA = $testRoot
 
 try {
-    & $setup -WorkerId 'ci-runner-01' -TrustedRepository 'owner/mobile-app' -TrustedRepository 'owner/mobile-app'
+    & $setup -WorkerId 'ci-runner-01' -TrustedRepository 'owner/mobile-app'
     if (-not $?) { throw 'Local Runner credential setup failed on first run.' }
     $credentialFile = Join-Path $testRoot 'DCP\runner-tokens.json'
     if (-not (Test-Path -LiteralPath $credentialFile -PathType Leaf)) {
