@@ -73,10 +73,10 @@ class PublicGitHubRepositoryCatalogTests(unittest.TestCase):
         commit_sha = "c" * 40
         tree_sha = "d" * 40
         pubspec = (
-            "name: sample_app\\n"
-            "dependencies:\\n"
-            "  flutter:\\n"
-            "    sdk: flutter\\n"
+            "name: sample_app\n"
+            "dependencies:\n"
+            "  flutter:\n"
+            "    sdk: flutter\n"
         )
         encoded = base64.b64encode(pubspec.encode("utf-8")).decode("ascii")
         self.catalog._request = Mock(side_effect=[
