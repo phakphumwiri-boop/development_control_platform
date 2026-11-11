@@ -221,10 +221,10 @@ class FlutterBuildExecutor:
         try:
             while len(finished_streams) < 2 or process.poll() is None:
                 now = time.monotonic()
-                if process.poll() is None and now >= deadline:
+                if outcome == "succeeded" and now >= deadline:
                     outcome, error_code = "failed", "BUILD_TIMEOUT"
                     self._terminate_tree(process)
-                elif process.poll() is None and cancel_requested and cancel_requested():
+                elif outcome == "succeeded" and cancel_requested and cancel_requested():
                     outcome, error_code = "cancelled", None
                     self._terminate_tree(process)
                 try:
