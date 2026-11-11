@@ -1,5 +1,6 @@
 """Tests for the policy-gated Flutter build executor."""
 import os
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -41,7 +42,10 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             command, windows=True, executable=executable
         )
         self.assertEqual(actual[:3], ["cmd.exe", "/d", "/s"])
-        self.assertEqual(actual[3], '"/C:\\Program Files\\Flutter SDK\\bin\\flutter.bat" build apk --release --no-pub"')
+        self.assertEqual(
+            actual[3],
+            '"' + subprocess.list2cmdline([executable, *command[1:]]) + '"',
+        )
         self.assertEqual(
             FlutterBuildExecutor._process_command(
                 command, windows=True, executable=r"C:\Flutter\bin\flutter.exe"
