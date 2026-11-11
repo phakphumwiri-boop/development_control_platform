@@ -66,6 +66,15 @@ def load_runner_tokens(path: Path | None = None) -> dict[str, str]:
     return value
 
 
+def gateway_child_environment(base_environment=None) -> dict[str, str]:
+    """Prepare the Gateway environment, overriding any inherited Runner map with the protected file."""
+    env = dict(os.environ if base_environment is None else base_environment)
+    runner_tokens = load_runner_tokens()
+    if runner_tokens:
+        env["DCP_RUNNER_TOKENS"] = json.dumps(runner_tokens, separators=(",", ":"))
+    return env
+
+
 def password_record(username: str, password: str, salt: bytes | None = None) -> dict:
     salt = salt or secrets.token_bytes(32)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ROUNDS)
@@ -388,10 +397,7 @@ def main():
     credentials = load_or_create_credentials()
     gateway_token = secrets.token_urlsafe(48)
     proxy_secret = secrets.token_urlsafe(48)
-    env = os.environ.copy()
-    runner_tokens = load_runner_tokens()
-    if runner_tokens:
-        env["DCP_RUNNER_TOKENS"] = json.dumps(runner_tokens, separators=(",", ":"))
+    env = gateway_child_environment()
     env.update({
         "DCP_GATEWAY_HOST": HOST, "DCP_GATEWAY_PORT": str(GATEWAY_PORT),
         "DCP_GATEWAY_API_TOKEN": gateway_token, "DCP_TRUSTED_PROXY_HMAC_SECRET": proxy_secret,
