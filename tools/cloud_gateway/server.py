@@ -27,6 +27,7 @@ from .runner_registry import RunnerRegistry, WorkerNotFound
 from .scheduler import RunnerScheduler, RunnerNotEligible, RunnerNotRegistered
 from .infrastructure import (FakeInfrastructureProvider, InfrastructureManager,
                              InfrastructureStore, ProviderUnavailable, ResourceNotFound)
+from .recon_api import ReconAPIError, fetch_recon_resource
 
 
 class DisabledProvider:
@@ -236,7 +237,6 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 if identity.get("role") not in ("owner", "operator"):
                     return self.send_json(403, {"error": "dashboard role required"})
                 try:
-                    from .recon_api import ReconAPIError, fetch_recon_resource
                     payload = fetch_recon_resource(path)
                 except ReconAPIError as exc:
                     return self.send_json(exc.status, {"error": exc.public_message})
