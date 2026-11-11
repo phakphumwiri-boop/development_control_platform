@@ -88,13 +88,17 @@ if ($null -ne $existingSettingsItem) {
     }
     if ($null -eq $existingSettings -or $existingSettings -isnot [pscustomobject] -or
         @($existingSettings.PSObject.Properties).Count -ne 1 -or
-        $null -eq $existingSettings.PSObject.Properties['allowed_repositories']) {
+        $null -eq $existingSettings.PSObject.Properties['allowed_repositories'] -or
+        $existingSettings.allowed_repositories -isnot [System.Array]) {
         throw 'Existing local Gateway settings file has an invalid schema.'
     }
     $settingsFileExists = $true
     foreach ($repository in @($existingSettings.allowed_repositories)) {
         if ($repository -isnot [string] -or $repository -notmatch $repositoryPattern) {
             throw 'Existing local Gateway allowlist contains an invalid repository.'
+        }
+        if ($allowedRepositoryMap.ContainsKey($repository)) {
+            throw 'Existing local Gateway allowlist contains duplicate repository names.'
         }
         if ($allowedRepositoryMap.ContainsKey($repository)) {
             throw 'Existing local Gateway allowlist contains duplicate repository names.'
