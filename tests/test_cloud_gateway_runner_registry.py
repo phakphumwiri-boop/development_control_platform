@@ -55,7 +55,7 @@ class RunnerRegistryTests(unittest.TestCase):
         self.assertIn("build_android", targets)
         self.assertIn("build_web", targets)
         self.assertNotIn("build_windows", targets)
-        self.assertNotIn("build", targets) if "android" not in set() else None
+        self.assertIn("build", targets)
 
     def test_stale_runner_is_reported_offline_and_cannot_claim(self):
         self.registry.register("runner-stale", "linux", ["flutter", "linux"])
