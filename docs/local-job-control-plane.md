@@ -89,13 +89,13 @@ The Runner Agent now has a one-job execution pipeline:
 
 - `GitHubCommitCheckout` downloads only `https://api.github.com/repos/{owner}/{repo}/zipball/{commit_sha}`; redirects are HTTPS-only and restricted to GitHub archive hosts.
 - Archive download and expanded size, entry count, paths, and file types are bounded. Path traversal, symlinks, special files, and non-Flutter commits are rejected. No Git hooks, submodules, or repository scripts run during checkout.
-- Flutter commands are fixed by target; arbitrary shell commands, command arguments, and environment variables are not accepted.
+- Flutter commands are fixed by target; arbitrary shell commands, command arguments, and environment variables are not accepted. The Runner performs a read-only host preflight before execution and rejects configured capabilities that were not detected locally.
 - Supported targets: `test`, `build` (Android APK), `package` (Android App Bundle), `build_android`, `build_web`, `build_windows`, `build_linux`, `build_macos`, and `build_ios`.
 - macOS/iOS targets require a macOS host; Windows and Linux targets require their corresponding host OS.
 - Process execution has a bounded timeout, bounded combined output, process-group termination, and periodic Runner lease heartbeat/cancellation checks.
-- Execution is disabled by default. `--check` remains health-only. `--once` processes at most one job and requires `DCP_RUNNER_EXECUTION_ENABLED=1`, an absolute `DCP_RUNNER_WORKSPACE_ROOT`, and a non-empty JSON array in `DCP_RUNNER_TRUSTED_REPOSITORIES`.
+- Execution is disabled by default. `--check` remains health-only. `--once` processes at most one job and requires `DCP_RUNNER_EXECUTION_ENABLED=1`, an absolute `DCP_RUNNER_WORKSPACE_ROOT`, a non-empty JSON array in `DCP_RUNNER_TRUSTED_REPOSITORIES`, and a successful local Git/Flutter preflight. `DCP_RUNNER_CAPABILITIES`, when supplied, must be a unique subset of preflight-detected capabilities.
 - Set `DCP_GITHUB_TOKEN` only as a host environment secret when private-repository read access is required. It is not stored in a job, logged, or passed in a URL.
-- This release does not yet upload build outputs as artifacts. Artifact capture, checksums, retention, and authenticated download are the next milestone.
+- Build outputs are packaged by `FlutterArtifactPackager`, uploaded through the authenticated Runner endpoint, indexed with SHA-256 metadata, and downloadable through the authenticated Dashboard Artifact Center.
 
 Example PowerShell configuration (use a dedicated, disposable Runner host and an operator-approved repository):
 
@@ -106,7 +106,7 @@ $env:DCP_RUNNER_TOKEN = "<dedicated-runner-token>"
 $env:DCP_RUNNER_EXECUTION_ENABLED = "1"
 $env:DCP_RUNNER_WORKSPACE_ROOT = "D:\\DCP\\workspaces"
 $env:DCP_RUNNER_TRUSTED_REPOSITORIES = '["owner/repository"]'
-$env:DCP_RUNNER_CAPABILITIES = '["flutter","windows","android","web"]'
+$env:DCP_RUNNER_CAPABILITIES = '["flutter","android","web"]' # Add windows only when Visual Studio C++ toolchain preflight passes
 python -m tools.local_runner_agent --once
 ```
 
@@ -134,5 +134,5 @@ The command processes no more than one queued job. The host must have the Flutte
 - Unsupported platform jobs remain queued for a compatible worker instead of being claimed and failing on the wrong OS.
 - Runner liveness is refreshed during active builds. Workers older than `DCP_GATEWAY_RUNNER_STALE_SECONDS` (default 60 seconds; allowed 15–3600) are reported offline.
 - Dashboard operators can Drain a worker to stop new claims while allowing its active Job to finish, then Enable it again. A stale worker becomes online again only after it checks in.
-- Configure `DCP_RUNNER_CAPABILITIES` as a JSON array containing `flutter`, the host OS (`linux|windows|macos`), and only SDK targets actually installed on that host (for example `android`, `web`, `ios`). The default is only `flutter` plus the detected host OS; cross-platform targets are not assumed.
+- `host_os` is recorded separately from build capabilities. Configure `DCP_RUNNER_CAPABILITIES` as a JSON array containing only targets actually detected by local preflight (for example `flutter`, `android`, `web`, `windows`, `linux`, `macos`, `ios`). A Windows host without Visual Studio may still register for Android/Web work but will not advertise Windows desktop builds. The default uses the full preflight-detected capability set; cross-platform targets are never assumed.
 - The CLI remains one-shot (`--once`); continuous polling/daemon supervision is a separate deployment decision.

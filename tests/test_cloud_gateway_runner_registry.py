@@ -46,6 +46,24 @@ class RunnerRegistryTests(unittest.TestCase):
         self.assertEqual(active["state"], "online")
         self.assertIn("build_windows", self.registry.allowed_targets("runner-enrolled"))
 
+    def test_windows_host_without_windows_toolchain_can_only_claim_verified_targets(self):
+        self.registry.register(
+            "windows-android-only", "windows", ["flutter", "android", "web"]
+        )
+        targets = self.registry.allowed_targets("windows-android-only")
+        self.assertIn("test", targets)
+        self.assertIn("build_android", targets)
+        self.assertIn("build_web", targets)
+        self.assertNotIn("build_windows", targets)
+        self.assertIn("build", targets)
+
+        self.registry.register("windows-flutter-only", "windows", ["flutter", "web"])
+        flutter_targets = self.registry.allowed_targets("windows-flutter-only")
+        self.assertIn("test", flutter_targets)
+        self.assertIn("build_web", flutter_targets)
+        self.assertNotIn("build", flutter_targets)
+        self.assertNotIn("package", flutter_targets)
+
     def test_stale_runner_is_reported_offline_and_cannot_claim(self):
         self.registry.register("runner-stale", "linux", ["flutter", "linux"])
         with self.registry.db() as conn:

@@ -83,19 +83,28 @@ class FlutterBuildExecutor:
 
     @staticmethod
     def _process_command(command: tuple[str, ...], *, windows: bool | None = None,
-                         executable: str | None = None) -> list[str]:
-        """Resolve Flutter's Windows .bat shim through cmd.exe without enabling shell=True.
+                         executable: str | None = None) -> list[str] | str:
+        """Resolve Flutter's Windows .bat shim through cmd.exe without shell=True.
 
-        Python cannot launch .bat/.cmd files directly with shell=False. The command
-        itself remains the fixed target allowlist; list2cmdline handles Windows
-        argument quoting and the executable path is resolved by shutil.which.
+        Python cannot launch .bat/.cmd files directly with shell=False. For this
+        case a raw CreateProcess command line is required: cmd.exe's /c quoting
+        rules are not compatible with Python's argv-to-command-line escaping.
+        The invoked batch path and all arguments still come from the fixed target
+        allowlist and shutil.which; no caller-supplied command is accepted.
         """
         is_windows = os.name == "nt" if windows is None else windows
         resolved = executable or shutil.which(command[0])
         if not is_windows or not resolved or Path(resolved).suffix.lower() not in (".bat", ".cmd"):
             return list(command)
         command_line = subprocess.list2cmdline([resolved, *command[1:]])
-        return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", f'"{command_line}"']
+        command_processor = os.environ.get("COMSPEC") or str(
+            Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
+        )
+        return (
+            subprocess.list2cmdline([command_processor])
+            + " /d /s /c "
+            + f'"{command_line}"'
+        )
 
     @staticmethod
     def _terminate_tree(process: subprocess.Popen) -> None:

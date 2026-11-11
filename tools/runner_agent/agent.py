@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-from .preflight import collect_preflight
+from .preflight import collect_preflight, resolve_capabilities
 
 
 class GatewayError(RuntimeError):
@@ -295,21 +295,17 @@ def main(argv=None):
     # Both enrollment and execution use the same conservative, local-only probe.
     # Capabilities explicitly configured by an operator may only reduce the detected set.
     report = collect_preflight()
-    if not report["minimum_agent_prerequisites_met"]:
-        parser.error("Runner host preflight failed: Git and Flutter are required")
     current_host = host_os()
-    if report["host_os"] != current_host or current_host not in report["detected_capabilities"]:
-        parser.error("Runner host preflight did not verify the complete host platform toolchain")
-    detected = set(report["detected_capabilities"])
-    if configured_caps:
-        caps = sorted({part.strip() for part in configured_caps.split(",") if part.strip()})
-        if not caps or not set(caps).issubset(detected):
-            parser.error("DCP_RUNNER_CAPABILITIES must be a non-empty subset of preflight-detected capabilities")
-    else:
-        caps = sorted(detected)
-    # The registry requires the physical host OS in the capability set. This is
-    # safe because the preflight check above verified that platform toolchain.
-    caps = sorted(set(caps) | {current_host})
+    if report.get("host_os") != current_host:
+        parser.error("Runner preflight host OS does not match this machine")
+    configured = (
+        [part.strip() for part in configured_caps.split(",") if part.strip()]
+        if configured_caps else None
+    )
+    try:
+        caps = resolve_capabilities(report, configured)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     client = GatewayClient(base_url, token)
     if args.enroll_only:

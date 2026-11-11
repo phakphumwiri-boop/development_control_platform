@@ -8,6 +8,23 @@ from tools.runner_agent import preflight
 
 
 class RunnerPreflightTests(unittest.TestCase):
+    def test_windows_host_without_visual_studio_keeps_android_and_web_capabilities(self):
+        report = {
+            "host_os": "windows",
+            "minimum_agent_prerequisites_met": True,
+            "detected_capabilities": ["flutter", "web", "android"],
+        }
+        self.assertEqual(
+            preflight.resolve_capabilities(report),
+            ["android", "flutter", "web"],
+        )
+        self.assertEqual(
+            preflight.resolve_capabilities(report, ["android", "flutter"]),
+            ["android", "flutter"],
+        )
+        with self.assertRaisesRegex(ValueError, "subset"):
+            preflight.resolve_capabilities(report, ["flutter", "windows"])
+
     @patch("tools.runner_agent.preflight.platform.system", return_value="Linux")
     @patch("tools.runner_agent.preflight.platform.python_version", return_value="3.12.0")
     @patch("tools.runner_agent.preflight.shutil.which")
@@ -97,6 +114,36 @@ class RunnerPreflightTests(unittest.TestCase):
         self.assertTrue(report["tools"]["android_sdk"]["installed"])
         self.assertFalse(report["tools"]["adb"]["installed"])
         self.assertNotIn("android", report["detected_capabilities"])
+
+
+    @patch("tools.runner_agent.preflight.subprocess.run")
+    def test_visual_studio_ide_without_cpp_workload_is_not_windows_ready(self, run):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            installer = Path(temp_dir) / "Microsoft Visual Studio" / "Installer"
+            installer.mkdir(parents=True)
+            (installer / "vswhere.exe").write_bytes(b"")
+            run.return_value.returncode = 0
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+            with patch.dict("os.environ", {"ProgramFiles": temp_dir}, clear=True):
+                report = preflight._visual_studio()
+        self.assertFalse(report["installed"])
+        self.assertIsNone(report["version"])
+        self.assertIn("Microsoft.VisualStudio.Workload.NativeDesktop", run.call_args.args[0])
+
+    @patch("tools.runner_agent.preflight.subprocess.run")
+    def test_visual_studio_cpp_workload_reports_verified_version(self, run):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            installer = Path(temp_dir) / "Microsoft Visual Studio" / "Installer"
+            installer.mkdir(parents=True)
+            (installer / "vswhere.exe").write_bytes(b"")
+            run.return_value.returncode = 0
+            run.return_value.stdout = "18.0.0"
+            run.return_value.stderr = ""
+            with patch.dict("os.environ", {"ProgramFiles": temp_dir}, clear=True):
+                report = preflight._visual_studio()
+        self.assertTrue(report["installed"])
+        self.assertEqual(report["version"], "18.0.0")
 
 
 if __name__ == "__main__":
