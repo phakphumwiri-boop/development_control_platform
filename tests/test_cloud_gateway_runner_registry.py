@@ -57,6 +57,13 @@ class RunnerRegistryTests(unittest.TestCase):
         self.assertNotIn("build_windows", targets)
         self.assertIn("build", targets)
 
+        self.registry.register("windows-flutter-only", "windows", ["flutter", "web"])
+        flutter_targets = self.registry.allowed_targets("windows-flutter-only")
+        self.assertIn("test", flutter_targets)
+        self.assertIn("build_web", flutter_targets)
+        self.assertNotIn("build", flutter_targets)
+        self.assertNotIn("package", flutter_targets)
+
     def test_stale_runner_is_reported_offline_and_cannot_claim(self):
         self.registry.register("runner-stale", "linux", ["flutter", "linux"])
         with self.registry.db() as conn:
