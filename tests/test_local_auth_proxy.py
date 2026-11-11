@@ -374,5 +374,55 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
         self.assertNotIn(self.secret, html)
 
 
+
+class LocalRunnerCredentialFileTests(unittest.TestCase):
+    def test_missing_runner_credential_file_returns_empty_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.assertEqual(auth.load_runner_tokens(Path(temp) / "missing.json"), {})
+
+    def test_loads_valid_local_runner_credential_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            credentials = {
+                "windows-local-01": "a" * 48,
+                "linux-build-01": "b" * 48,
+            }
+            path.write_text(json.dumps(credentials), encoding="utf-8")
+            self.assertEqual(auth.load_runner_tokens(path), credentials)
+
+    def test_rejects_invalid_or_duplicate_runner_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            for credentials in (
+                [],
+                {"bad/worker": "a" * 48},
+                {"worker": "short"},
+                {"worker-a": "a" * 48, "worker-b": "a" * 48},
+            ):
+                with self.subTest(credentials=list(credentials) if isinstance(credentials, dict) else credentials):
+                    path.write_text(json.dumps(credentials), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        auth.load_runner_tokens(path)
+
+    def test_rejects_symlink_runner_credential_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            actual = root / "actual.json"
+            actual.write_text(json.dumps({"worker": "a" * 48}), encoding="utf-8")
+            link = root / "runner-tokens.json"
+            try:
+                link.symlink_to(actual)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is not available on this host")
+            with self.assertRaisesRegex(SystemExit, "non-symlink"):
+                auth.load_runner_tokens(link)
+
+    def test_rejects_oversized_runner_credential_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            path.write_text(" " * (auth.MAX_RUNNER_TOKEN_FILE_BYTES + 1), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "size limit"):
+                auth.load_runner_tokens(path)
+
 if __name__ == "__main__":
     unittest.main()
