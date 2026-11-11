@@ -13,6 +13,35 @@ class RunnerAgentTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_command("arbitrary-shell")
 
+    def test_package_target_builds_android_app_bundle(self):
+        self.assertEqual(
+            build_command("package"),
+            ["flutter", "build", "appbundle", "--release"],
+        )
+
+    def test_package_output_returns_apk_as_direct_artifact(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "build" / "app" / "outputs" / "flutter-apk" / "app-release.apk"
+            output.parent.mkdir(parents=True)
+            output.write_bytes(b"apk-fixture")
+            artifact = package_output(root, "build_android")
+            self.assertEqual(artifact, output)
+            self.assertEqual(artifact.read_bytes(), b"apk-fixture")
+            self.assertFalse((root / "dcp-build_android.zip").exists())
+
+    def test_package_output_returns_aab_as_direct_artifact(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "build" / "app" / "outputs" / "bundle" / "release" / "app-release.aab"
+            output.parent.mkdir(parents=True)
+            output.write_bytes(b"aab-fixture")
+            artifact = package_output(root, "package")
+            self.assertEqual(artifact, output)
+            self.assertEqual(artifact.read_bytes(), b"aab-fixture")
+
     def test_package_output_archives_expected_directory(self):
         import tempfile
         with tempfile.TemporaryDirectory() as temp:
