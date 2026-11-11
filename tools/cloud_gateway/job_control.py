@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .sqlite_security import prepare_private_sqlite_file
+
 class JobConflict(RuntimeError):
     pass
 
@@ -22,8 +24,7 @@ class JobStore:
     def __init__(self, path="dcp-jobs.sqlite3"):
         self.path = str(path)
         self.lock = threading.RLock()
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite_file(self.path)
         with self.db() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS jobs (
