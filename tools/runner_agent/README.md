@@ -21,8 +21,16 @@ Do not run this agent on a workstation containing sensitive credentials.
   the runner. The agent does not copy GitHub App or dashboard credentials.
 - Git checkout is detached at the immutable commit SHA returned by the Gateway.
   The agent verifies `git rev-parse HEAD` before running Flutter.
-- Commands use argument arrays with `shell=False`; arbitrary job-supplied shell
-  commands are not accepted.
+- Commands use a fixed target allowlist with `shell=False`; Windows Flutter
+  batch shims are launched through an explicit `cmd.exe` command line.
+- Execution requires an exact `DCP_RUNNER_TRUSTED_REPOSITORIES` JSON allowlist.
+  Jobs for other repositories are rejected before checkout.
+- Build subprocesses receive only an allowlist of OS/toolchain variables.
+  Runner tokens, GitHub tokens, and other arbitrary parent-process variables
+  are never forwarded to project build code.
+- HOME, APPDATA, LOCALAPPDATA, temporary files, and package caches are isolated
+  to the job workspace; Android SDK and Visual Studio paths are preserved
+  explicitly when required.
 - OS-specific jobs are rejected locally if the host OS does not match.
 - Build logs are streamed to the job; the job lease is renewed while commands run.
 - Artifact uploads use the existing lease-checked Gateway endpoint and bounded
@@ -84,9 +92,14 @@ detected capabilities are registered.
 Only on a dedicated, disposable host after enrollment and operator review:
 
 ```powershell
+$env:DCP_RUNNER_TRUSTED_REPOSITORIES = '["owner/mobile-app"]'
 $env:DCP_RUNNER_EXECUTION_ENABLED = "true"
 python -m tools.runner_agent.agent --once
 ```
+
+The trusted repository JSON array is mandatory before execution can start.
+Use exact `owner/repository` entries; do not add repositories merely to make
+a job pass. The Runner rejects non-allowlisted jobs before any checkout.
 
 For a long-running service, omit `--once` and supervise the process with the
 host's service manager. Execution remains disabled unless explicitly enabled.
@@ -103,6 +116,9 @@ python -m unittest discover -s tests -v
 ```
 
 Tests do not contact the Gateway, clone repositories, or run Flutter builds.
+Security regression tests also verify strict Gateway origin validation,
+trusted-repository enforcement, child-process secret isolation, and bounded
+artifact handling.
 A real host acceptance test is still required for each supported operating
 system. In particular, macOS readiness is not claimed until a real Mac Runner
 has registered and completed a build.
