@@ -172,5 +172,61 @@ class RunnerPipelineEndToEndTests(unittest.TestCase):
         self.assertEqual(metadata["sha256"], artifact["sha256"])
         self.assertFalse((self.root / "workspaces" / job["id"]).exists())
 
+
+@unittest.skipUnless(os.name == "nt", "Requires the real Windows cmd.exe batch-file launcher")
+class WindowsRunnerPipelineAcceptanceTests(RunnerPipelineEndToEndTests):
+    def test_windows_cmd_flutter_build_runs_through_gateway_and_artifact_pipeline(self):
+        job, created = self.jobs.create({
+            "repository": "owner/mobile-app",
+            "commit_sha": "d" * 40,
+            "target": "build_android",
+        }, "runner-windows-full-e2e-001")
+        self.assertTrue(created)
+
+        bin_dir = self.root / "Flutter SDK" / "bin"
+        bin_dir.mkdir(parents=True)
+        flutter_cmd = bin_dir / "flutter.cmd"
+        flutter_cmd.write_text(
+            "@echo off\r\n"
+            "if /I \"%1\"==\"build\" if /I \"%2\"==\"apk\" (\r\n"
+            "  if not exist \"build\\app\\outputs\\flutter-apk\" mkdir \"build\\app\\outputs\\flutter-apk\"\r\n"
+            "  > \"build\\app\\outputs\\flutter-apk\\app-release.apk\" echo dcp-fixture-apk\r\n"
+            "  exit /b 0\r\n"
+            ")\r\n"
+            "exit /b 91\r\n",
+            encoding="utf-8",
+        )
+
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
+        try:
+            executor = FlutterBuildExecutor(
+                self.manager, enabled=True, timeout_seconds=30,
+                max_output_bytes=1024 * 1024,
+            )
+            pipeline = RunnerPipeline(
+                self.client, self.manager, _FixtureCheckout(self.manager), executor,
+                trusted_repositories={"owner/mobile-app"},
+                worker_os="windows",
+                capabilities={"flutter", "windows", "android"},
+            )
+            result = pipeline.run_once()
+        finally:
+            os.environ["PATH"] = old_path
+
+        self.assertEqual(result["outcome"], "succeeded")
+        self.assertEqual(result["job"]["id"], job["id"])
+        self.assertEqual(result["job"]["state"], "succeeded")
+        artifact = result["result"]["artifact"]
+        self.assertEqual(artifact["name"], "app-release.apk")
+        metadata, handle = self.artifacts.open(artifact["id"])
+        with handle:
+            self.assertEqual(handle.read().strip(), b"dcp-fixture-apk")
+        self.assertEqual(metadata["sha256"], artifact["sha256"])
+        self.assertFalse((self.root / "workspaces" / job["id"]).exists())
+        self.assertTrue(any(
+            row["message"] == "Workspace cleaned" for row in self.jobs.logs(job["id"])
+        ))
+
 if __name__ == "__main__":
     unittest.main()
