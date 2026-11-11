@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.local_runner_agent.workspace import WorkspaceManager
 from tools.local_runner_agent.execution import ExecutionError, FlutterBuildExecutor
@@ -110,6 +111,31 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         executor = FlutterBuildExecutor(self.manager, enabled=True)
         with self.assertRaises(ExecutionError):
             executor.run(self.job_id, self.worker, "test")
+
+
+@unittest.skipUnless(os.name == "nt", "Requires the real Windows cmd.exe batch-file launcher")
+class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
+    def test_executes_flutter_cmd_shim_from_path_with_spaces(self):
+        bin_dir = self.root / "Flutter SDK" / "bin"
+        bin_dir.mkdir(parents=True)
+        args_file = self.root / "captured Flutter args.txt"
+        flutter_cmd = bin_dir / "flutter.cmd"
+        flutter_cmd.write_text(
+            "@echo off\\r\\n"
+            + "echo %* > \"" + str(args_file) + "\"\\r\\n"
+            + "exit /b 0\\r\\n",
+            encoding="utf-8",
+        )
+        old_path = os.environ.get("PATH", "")
+        with patch.dict(os.environ, {"PATH": str(bin_dir) + os.pathsep + old_path}):
+            executor = FlutterBuildExecutor(
+                self.manager, enabled=True, timeout_seconds=10,
+                max_output_bytes=1024,
+            )
+            result = executor.run(self.job_id, self.worker, "test")
+        self.assertEqual(result.outcome, "succeeded")
+        self.assertEqual(result.return_code, 0)
+        self.assertEqual(args_file.read_text(encoding="utf-8").strip(), "test --no-pub")
 
 
 if __name__ == "__main__":
