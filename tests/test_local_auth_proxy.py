@@ -426,6 +426,26 @@ class LocalRunnerCredentialFileTests(unittest.TestCase):
                     with self.assertRaises(SystemExit):
                         auth.load_runner_tokens(path)
 
+    def test_rejects_duplicate_json_worker_keys(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            path.write_text(
+                '{"worker":"' + "a" * 48 + '","worker":"' + "b" * 48 + '"}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(SystemExit, "invalid JSON"):
+                auth.load_runner_tokens(path)
+
+    def test_rejects_broken_symlink_runner_credential_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            link = Path(temp) / "runner-tokens.json"
+            try:
+                link.symlink_to(Path(temp) / "missing-target.json")
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is not available on this host")
+            with self.assertRaisesRegex(SystemExit, "symlink"):
+                auth.load_runner_tokens(link)
+
     def test_rejects_symlink_runner_credential_file(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
