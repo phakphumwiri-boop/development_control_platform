@@ -36,11 +36,22 @@ if ($EnableExecution) {
         throw 'Execution requires at least one explicit -TrustedRepository owner/repository.'
     }
     $gatewaySettingsFile = Join-Path $env:LOCALAPPDATA 'DCP\gateway-local-settings.json'
-    if (-not (Test-Path -LiteralPath $gatewaySettingsFile -PathType Leaf)) {
+    $gatewaySettingsItem = Get-Item -LiteralPath $gatewaySettingsFile -Force -ErrorAction SilentlyContinue
+    if ($null -eq $gatewaySettingsItem) {
         throw 'Gateway repository allowlist is missing. Run Setup-DCP-Local-Runner.ps1 -TrustedRepository owner/repository, then restart DCP.'
+    }
+    if ((($gatewaySettingsItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+        $gatewaySettingsItem.PSIsContainer -or $gatewaySettingsItem.Length -gt 16384) {
+        throw 'Gateway repository allowlist file is unsafe or exceeds 16 KiB.'
     }
     try { $gatewaySettings = Get-Content -LiteralPath $gatewaySettingsFile -Raw | ConvertFrom-Json }
     catch { throw 'Gateway repository allowlist file is invalid.' }
+    if ($null -eq $gatewaySettings -or $gatewaySettings -isnot [pscustomobject] -or
+        @($gatewaySettings.PSObject.Properties).Count -ne 1 -or
+        $null -eq $gatewaySettings.PSObject.Properties['allowed_repositories'] -or
+        $gatewaySettings.allowed_repositories -isnot [System.Array]) {
+        throw 'Gateway repository allowlist file has an invalid schema.'
+    }
     $gatewayAllowed = @($gatewaySettings.allowed_repositories)
     foreach ($repository in $TrustedRepository) {
         if ($repository -notmatch '^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$') {
