@@ -51,7 +51,7 @@ if ($EnableExecution) {
         throw 'Trusted repositories must be unique.'
     }
     foreach ($repository in $TrustedRepository) {
-        if ($gatewayAllowed -notcontains $repository) {
+        if ($gatewayAllowed -cnotcontains $repository) {
             throw "Repository '$repository' is not in the Gateway allowlist. Run Setup-DCP-Local-Runner.ps1 -TrustedRepository '$repository' and restart DCP."
         }
     }
