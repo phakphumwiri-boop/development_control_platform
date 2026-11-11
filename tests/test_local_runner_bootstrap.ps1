@@ -54,6 +54,10 @@ try {
     if ($acl -match 'Everyone|Authenticated Users|BUILTIN\\Users') {
         throw 'Runner credential ACL grants access to a broad user group.'
     }
+    $settingsAcl = (& icacls.exe $settingsFile) -join [Environment]::NewLine
+    if ($LASTEXITCODE -ne 0 -or $settingsAcl -match 'Everyone|Authenticated Users|BUILTIN\\Users') {
+        throw 'Gateway settings ACL grants access to a broad user group or could not be verified.'
+    }
 
     Write-Host 'Local Runner credential bootstrap tests passed.'
 } finally {
