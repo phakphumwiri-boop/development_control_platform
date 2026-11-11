@@ -37,17 +37,31 @@ RUNNER_TOKENS_FILE = CREDENTIALS.parent / "runner-tokens.json"
 MAX_RUNNER_TOKEN_FILE_BYTES = 64 * 1024
 
 
+def _unique_runner_token_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate worker ID")
+        result[key] = value
+    return result
+
+
 def load_runner_tokens(path: Path | None = None) -> dict[str, str]:
     """Load the protected local Runner token map without logging or exposing secrets."""
     target = Path(path) if path is not None else RUNNER_TOKENS_FILE
+    if target.is_symlink():
+        raise SystemExit("Local Runner credential file must not be a symlink")
     if not target.exists():
         return {}
-    if target.is_symlink() or not target.is_file():
+    if not target.is_file():
         raise SystemExit("Local Runner credential file must be a regular non-symlink file")
     if target.stat().st_size > MAX_RUNNER_TOKEN_FILE_BYTES:
         raise SystemExit("Local Runner credential file exceeds its size limit")
     try:
-        value = json.loads(target.read_text(encoding="utf-8"))
+        value = json.loads(
+            target.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_runner_token_object,
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         raise SystemExit("Local Runner credential file is unreadable or invalid JSON") from None
     if not isinstance(value, dict) or not 1 <= len(value) <= 16:
