@@ -320,7 +320,7 @@ def make_handler(app: LocalAuthProxy, dashboard_dir: Path):
                     return self.send_json(401, {"error": "authenticated session required"})
                 if path not in ALLOWED_GET and not (
                     path.startswith("/api/cloud-runners/") and path.count("/") == 3
-                ):
+                ) and not path.startswith("/api/recon/"):
                     return self.send_json(404, {"error": "not found"})
                 status, data = app.gateway_request("GET", path, session)
                 return self.send_bytes(status, data)
