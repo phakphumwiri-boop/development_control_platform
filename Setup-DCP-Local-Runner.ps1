@@ -103,9 +103,6 @@ if ($null -ne $existingSettingsItem) {
         if ($allowedRepositoryMap.ContainsKey($repository)) {
             throw 'Existing local Gateway allowlist contains duplicate repository names.'
         }
-        if ($allowedRepositoryMap.ContainsKey($repository)) {
-            throw 'Existing local Gateway allowlist contains duplicate repository names.'
-        }
         $allowedRepositoryMap[$repository] = $repository
     }
 }
