@@ -328,6 +328,10 @@ def make_handler(app: LocalAuthProxy, dashboard_dir: Path):
             target = (root / relative).resolve()
             if root not in target.parents and target != root:
                 return self.send_json(404, {"error": "not found"})
+            if target.is_dir():
+                target = (target / "index.html").resolve()
+                if root not in target.parents:
+                    return self.send_json(404, {"error": "not found"})
             if not target.is_file():
                 return self.send_json(404, {"error": "not found"})
             types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
