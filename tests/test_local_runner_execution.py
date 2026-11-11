@@ -91,12 +91,12 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         bin_dir.mkdir()
         flutter = bin_dir / "flutter"
         calls_file = self.root / "flutter-calls.txt"
-        flutter.write_text(
-            "#!/bin/sh\n"
-            + "printf '%s\\n' \"$*\" >> '" + str(calls_file) + "'\n"
-            + "printf 'flutter-fixture-ok\\n'\n"
-            + "exit 0\n"
-        )
+        flutter.write_text("\n".join([
+            "#!/bin/sh",
+            "printf '%s\\n' \"$*\" >> '" + str(calls_file) + "'",
+            "printf 'flutter-fixture-ok\\n'",
+            "exit 0",
+        ]) + "\n")
         flutter.chmod(0o700)
         old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
@@ -124,12 +124,12 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         bin_dir.mkdir()
         calls_file = self.root / "flutter-calls.txt"
         flutter = bin_dir / "flutter"
-        flutter.write_text(
-            "#!/bin/sh\\n"
-            + "printf '%s\\\\n' \"$*\" >> '" + str(calls_file) + "'\\n"
-            + "if [ \"$1\" = \"pub\" ]; then exit 7; fi\\n"
-            + "exit 0\\n"
-        )
+        flutter.write_text("\n".join([
+            "#!/bin/sh",
+            "printf '%s\\n' \"$*\" >> '" + str(calls_file) + "'",
+            "if [ \"$1\" = \"pub\" ]; then exit 7; fi",
+            "exit 0",
+        ]) + "\n")
         flutter.chmod(0o700)
         old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
