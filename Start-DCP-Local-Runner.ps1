@@ -54,7 +54,66 @@ if ($EnableExecution) {
     }
     $gatewayAllowed = @($gatewaySettings.allowed_repositories)
     foreach ($repository in $TrustedRepository) {
-        if ($repository -notmatch '^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$') {
+        if ($repository -notmatch '^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}    }
+    $uniqueTrustedRepositories = @($TrustedRepository | Select-Object -Unique)
+    if ($uniqueTrustedRepositories.Count -ne $TrustedRepository.Count) {
+        throw 'Trusted repositories must be unique.'
+    }
+    foreach ($repository in $TrustedRepository) {
+        if ($gatewayAllowed -cnotcontains $repository) {
+            throw "Repository '$repository' is not in the Gateway allowlist. Run Setup-DCP-Local-Runner.ps1 -TrustedRepository '$repository' and restart DCP."
+        }
+    }
+} elseif ($TrustedRepository.Count -gt 0) {
+    throw '-TrustedRepository is only accepted together with -EnableExecution.'
+}
+
+try {
+    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18790/healthz' -TimeoutSec 3
+} catch {
+    throw 'DCP Gateway is not reachable. Start the DCP local stack and retry.'
+}
+if ($health.status -ne 'ok' -or $health.provisioning_enabled -ne $false) {
+    throw 'DCP Gateway health/safe-default check failed.'
+}
+
+$names = @('DCP_GATEWAY_URL','DCP_RUNNER_ID','DCP_RUNNER_TOKEN',
+           'DCP_RUNNER_EXECUTION_ENABLED','DCP_RUNNER_TRUSTED_REPOSITORIES')
+$previous = @{}
+foreach ($name in $names) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
+
+try {
+    $env:DCP_GATEWAY_URL = 'http://127.0.0.1:18790'
+    $env:DCP_RUNNER_ID = $WorkerId
+    $env:DCP_RUNNER_TOKEN = $property.Value
+    if ($EnableExecution) {
+        $env:DCP_RUNNER_EXECUTION_ENABLED = 'true'
+        $env:DCP_RUNNER_TRUSTED_REPOSITORIES = ConvertTo-Json -InputObject ([string[]]$TrustedRepository) -Compress
+        Write-Host "Starting Runner '$WorkerId' with execution enabled for the explicitly trusted repository list."
+    } else {
+        Remove-Item Env:DCP_RUNNER_EXECUTION_ENABLED -ErrorAction SilentlyContinue
+        Remove-Item Env:DCP_RUNNER_TRUSTED_REPOSITORIES -ErrorAction SilentlyContinue
+        Write-Host "Enrolling Runner '$WorkerId' offline. No jobs will be claimed or executed."
+    }
+
+    $runnerArgs = @()
+    if (-not $EnableExecution) { $runnerArgs = @('--enroll-only') }
+    elseif ($Once) { $runnerArgs = @('--once') }
+
+    Push-Location $project
+    try {
+        & $python.Source -3 -m tools.runner_agent.agent @runnerArgs
+        if ($LASTEXITCODE -ne 0) { throw "DCP Runner exited with code $LASTEXITCODE." }
+    } finally {
+        Pop-Location
+    }
+} finally {
+    foreach ($name in $names) {
+        [Environment]::SetEnvironmentVariable($name, $previous[$name], 'Process')
+    }
+}
+ -or
+            @($repository.Split('/')) -contains '.' -or @($repository.Split('/')) -contains '..') {
             throw "Invalid trusted repository name: $repository"
         }
     }
