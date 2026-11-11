@@ -41,6 +41,9 @@ class PublicGitHubRepositoryCatalog:
         for repository in allowed_repositories:
             if not isinstance(repository, str) or not self.REPOSITORY_RE.fullmatch(repository):
                 raise ValueError("Public repository allowlist contains an invalid name")
+            owner, name = repository.split("/", 1)
+            if owner in (".", "..") or name in (".", ".."):
+                raise ValueError("Public repository allowlist contains an invalid path segment")
             key = repository.lower()
             if key in seen:
                 raise ValueError("Public repository allowlist contains duplicates")
