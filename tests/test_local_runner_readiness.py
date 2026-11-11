@@ -1,6 +1,6 @@
 """Local Runner CLI must enforce read-only host readiness before job claims."""
-import json
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from tools.local_runner_agent import __main__ as runner_cli
@@ -16,7 +16,7 @@ class LocalRunnerReadinessTests(unittest.TestCase):
             "DCP_RUNNER_WORKER_ID": "windows-android-runner",
             "DCP_RUNNER_TOKEN": TOKEN,
             "DCP_RUNNER_EXECUTION_ENABLED": "1",
-            "DCP_RUNNER_WORKSPACE_ROOT": "C:/DCP/workspaces",
+            "DCP_RUNNER_WORKSPACE_ROOT": str(Path.cwd() / "dcp-test-workspaces"),
             "DCP_RUNNER_TRUSTED_REPOSITORIES": '["owner/repo"]',
         }
         values.update(extra)
