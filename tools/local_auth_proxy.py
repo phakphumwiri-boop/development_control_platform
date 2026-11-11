@@ -62,7 +62,7 @@ def load_runner_tokens(path: Path | None = None) -> dict[str, str]:
             target.read_text(encoding="utf-8"),
             object_pairs_hook=_unique_runner_token_object,
         )
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         raise SystemExit("Local Runner credential file is unreadable or invalid JSON") from None
     if not isinstance(value, dict) or not 1 <= len(value) <= 16:
         raise SystemExit("Local Runner credential file must contain 1..16 worker credentials")
