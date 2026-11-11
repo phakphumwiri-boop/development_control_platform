@@ -202,5 +202,42 @@ class RunnerAgentTests(unittest.TestCase):
                 package_output(root, "build_web")
 
 
+@unittest.skipUnless(__import__("os").name == "nt", "Requires the real Windows cmd.exe batch-file launcher")
+class WindowsLegacyRunnerAcceptanceTests(unittest.TestCase):
+    def test_legacy_runner_launches_flutter_cmd_without_forwarding_secrets(self):
+        import os
+        import tempfile
+
+        client = Mock()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            bin_dir = root / "Flutter SDK" / "bin"
+            bin_dir.mkdir(parents=True)
+            args_file = root / "captured Flutter args.txt"
+            flutter_cmd = bin_dir / "flutter.cmd"
+            flutter_cmd.write_text(
+                "@echo off\r\n"
+                "if defined DCP_RUNNER_TOKEN exit /b 91\r\n"
+                "if defined GITHUB_TOKEN exit /b 92\r\n"
+                + "echo %* > \"" + str(args_file) + "\"\r\n"
+                + "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+            agent = RunnerAgent(client, "windows-runner", ["flutter"])
+            with patch.dict(os.environ, {
+                "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
+                "DCP_RUNNER_TOKEN": "must-not-reach-child",
+                "GITHUB_TOKEN": "must-not-reach-child",
+            }):
+                agent._run(
+                    ["flutter", "test", "--no-pub"], root,
+                    "00000000-0000-4000-8000-000000000001",
+                )
+            self.assertEqual(
+                args_file.read_text(encoding="utf-8").strip(),
+                "test --no-pub",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
