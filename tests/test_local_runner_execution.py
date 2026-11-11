@@ -89,6 +89,10 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         self.assertEqual(result.return_code, 0)
         self.assertEqual(result.command, ("flutter", "test", "--no-pub"))
         self.assertTrue(any("flutter-fixture-ok" in message for _, message in logs))
+        self.assertEqual(
+            calls_file.read_text(encoding="utf-8").splitlines(),
+            ["pub get --enforce-lockfile", "test --no-pub"],
+        )
 
     @unittest.skipIf(os.name == "nt", "POSIX fixture executable used for deterministic process tests")
     def test_timeout_terminates_process_group(self):
@@ -113,7 +117,13 @@ class FlutterBuildExecutorTests(unittest.TestCase):
     def test_requires_project_manifest(self):
         (self.workspace / "pubspec.yaml").unlink()
         executor = FlutterBuildExecutor(self.manager, enabled=True)
-        with self.assertRaises(ExecutionError):
+        with self.assertRaisesRegex(ExecutionError, "manifest"):
+            executor.run(self.job_id, self.worker, "test")
+
+    def test_requires_committed_lockfile(self):
+        (self.workspace / "pubspec.lock").unlink()
+        executor = FlutterBuildExecutor(self.manager, enabled=True)
+        with self.assertRaisesRegex(ExecutionError, "lockfile"):
             executor.run(self.job_id, self.worker, "test")
 
 
@@ -139,7 +149,10 @@ class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
             result = executor.run(self.job_id, self.worker, "test")
         self.assertEqual(result.outcome, "succeeded")
         self.assertEqual(result.return_code, 0)
-        self.assertEqual(args_file.read_text(encoding="utf-8").strip(), "test --no-pub")
+        self.assertEqual(
+            args_file.read_text(encoding="utf-8").splitlines(),
+            ["pub get --enforce-lockfile", "test --no-pub"],
+        )
 
 
 if __name__ == "__main__":
