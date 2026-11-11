@@ -35,6 +35,13 @@ if ($EnableExecution) {
     if ($TrustedRepository.Count -lt 1) {
         throw 'Execution requires at least one explicit -TrustedRepository owner/repository.'
     }
+    $gatewaySettingsFile = Join-Path $env:LOCALAPPDATA 'DCP\gateway-local-settings.json'
+    if (-not (Test-Path -LiteralPath $gatewaySettingsFile -PathType Leaf)) {
+        throw 'Gateway repository allowlist is missing. Run Setup-DCP-Local-Runner.ps1 -TrustedRepository owner/repository, then restart DCP.'
+    }
+    try { $gatewaySettings = Get-Content -LiteralPath $gatewaySettingsFile -Raw | ConvertFrom-Json }
+    catch { throw 'Gateway repository allowlist file is invalid.' }
+    $gatewayAllowed = @($gatewaySettings.allowed_repositories)
     foreach ($repository in $TrustedRepository) {
         if ($repository -notmatch '^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$') {
             throw "Invalid trusted repository name: $repository"
@@ -42,6 +49,11 @@ if ($EnableExecution) {
     }
     if (@($TrustedRepository | Select-Object -Unique).Count -ne $TrustedRepository.Count) {
         throw 'Trusted repositories must be unique.'
+    }
+    foreach ($repository in $TrustedRepository) {
+        if ($gatewayAllowed -notcontains $repository) {
+            throw "Repository '$repository' is not in the Gateway allowlist. Run Setup-DCP-Local-Runner.ps1 -TrustedRepository '$repository' and restart DCP."
+        }
     }
 } elseif ($TrustedRepository.Count -gt 0) {
     throw '-TrustedRepository is only accepted together with -EnableExecution.'
