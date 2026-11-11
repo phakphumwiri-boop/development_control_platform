@@ -118,8 +118,86 @@ class RunnerAgentTests(unittest.TestCase):
         client_type.assert_not_called()
 
     def test_gateway_client_requires_token(self):
-        client = GatewayClient("http://127.0.0.1:8000", "secret")
+        client = GatewayClient("http://127.0.0.1:8000", "x" * 40)
         self.assertEqual(client.base_url, "http://127.0.0.1:8000")
+
+    def test_gateway_client_rejects_lookalike_loopback_host_and_url_paths(self):
+        token = "x" * 40
+        for url in (
+            "http://127.0.0.1.evil.example:8789",
+            "http://127.0.0.2:8789",
+            "https://example.com/api",
+            "https://user:pass@example.com",
+            "https://example.com/?redirect=evil",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaises(ValueError):
+                    GatewayClient(url, token)
+
+    def test_runner_agent_rejects_untrusted_repository_before_checkout(self):
+        client = Mock()
+        agent = RunnerAgent(client, "runner-1", ["flutter"])
+        with self.assertRaisesRegex(RuntimeError, "trusted-repository"):
+            agent.execute({
+                "id": "00000000-0000-4000-8000-000000000001",
+                "target": "test", "repository": "owner/repo",
+                "commit_sha": "a" * 40,
+            })
+        client.log.assert_not_called()
+
+    def test_runner_agent_requires_target_capability_before_checkout(self):
+        client = Mock()
+        agent = RunnerAgent(
+            client, "runner-1", ["flutter"],
+            trusted_repositories={"owner/repo"},
+        )
+        with self.assertRaisesRegex(RuntimeError, "required build capabilities"):
+            agent.execute({
+                "id": "00000000-0000-4000-8000-000000000001",
+                "target": "build_android", "repository": "owner/repo",
+                "commit_sha": "a" * 40,
+            })
+        client.log.assert_not_called()
+
+    def test_build_subprocess_does_not_inherit_runner_or_github_tokens(self):
+        import io
+        import os
+        import sys
+        client = Mock()
+        agent = RunnerAgent(client, "runner-1", ["flutter"])
+        process = Mock()
+        process.stdout = io.StringIO("runner-safe-output\\n")
+        process.returncode = 0
+        process.poll.return_value = 0
+        with patch.dict(os.environ, {
+            "DCP_RUNNER_TOKEN": "runner-secret-value",
+            "DCP_GITHUB_TOKEN": "github-secret-value",
+            "GITHUB_TOKEN": "github-token-value",
+        }):
+            with patch("tools.runner_agent.agent.subprocess.Popen", return_value=process) as popen:
+                agent._run([sys.executable, "-c", "pass"], Path.cwd(),
+                           "00000000-0000-4000-8000-000000000001")
+        child_env = popen.call_args.kwargs["env"]
+        self.assertNotIn("DCP_RUNNER_TOKEN", child_env)
+        self.assertNotIn("DCP_GITHUB_TOKEN", child_env)
+        self.assertNotIn("GITHUB_TOKEN", child_env)
+        self.assertEqual(popen.call_args.kwargs["shell"], False)
+
+    def test_package_output_rejects_symlink_artifact(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "build" / "web"
+            output.mkdir(parents=True)
+            target = root / "outside.txt"
+            target.write_text("outside")
+            link = output / "index.html"
+            try:
+                link.symlink_to(target)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is not available on this host")
+            with self.assertRaisesRegex(RuntimeError, "non-regular"):
+                package_output(root, "build_web")
 
 
 if __name__ == "__main__":
