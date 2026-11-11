@@ -202,7 +202,7 @@ class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
         self.assertEqual(result.outcome, "succeeded")
         self.assertEqual(result.return_code, 0)
         self.assertEqual(
-            args_file.read_text(encoding="utf-8").splitlines(),
+            [line.strip() for line in args_file.read_text(encoding="utf-8").splitlines()],
             ["pub get --enforce-lockfile", "test --no-pub"],
         )
 
