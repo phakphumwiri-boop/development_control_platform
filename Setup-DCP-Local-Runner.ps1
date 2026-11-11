@@ -15,11 +15,13 @@ function Write-ProtectedJsonFile {
     $temp = $Path + '.' + [Guid]::NewGuid().ToString('N') + '.tmp'
     try {
         $json = ConvertTo-Json -InputObject $Value -Compress -Depth 5
-        [IO.File]::WriteAllText($temp, $json, [Text.UTF8Encoding]::new($false))
+        $encoding = [Text.UTF8Encoding]::new($false)
+        [IO.File]::WriteAllText($temp, '', $encoding)
         & icacls.exe $temp /inheritance:r /grant:r "$($script:identity):(R,W)" '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw 'Could not protect the temporary local DCP settings ACL.'
         }
+        [IO.File]::WriteAllText($temp, $json, $encoding)
         Move-Item -LiteralPath $temp -Destination $Path -Force
         & icacls.exe $Path /inheritance:r /grant:r "$($script:identity):(R,W)" '*S-1-5-18:(F)' '*S-1-5-32-544:(F)' | Out-Null
         if ($LASTEXITCODE -ne 0) {
