@@ -41,7 +41,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         actual = FlutterBuildExecutor._process_command(
             command, windows=True, executable=executable
         )
-        self.assertEqual(actual[:3], ["cmd.exe", "/d", "/s"])
+        self.assertEqual(actual[:4], ["cmd.exe", "/d", "/s", "/c"])
         self.assertEqual(
             actual[4],
             '"' + subprocess.list2cmdline([executable, *command[1:]]) + '"',
