@@ -13,6 +13,7 @@ from .checkout import GitHubCommitCheckout
 from .execution import FlutterBuildExecutor
 from .pipeline import RunnerPipeline
 from .workspace import WorkspaceManager
+from tools.runner_agent.preflight import collect_preflight, resolve_capabilities
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -87,16 +88,19 @@ def main(argv=None) -> int:
             host_os = "macos"
         if host_os not in ("linux", "windows", "macos"):
             raise ValueError("unsupported Runner host operating system")
-        raw_capabilities = json.loads(
-            os.environ.get("DCP_RUNNER_CAPABILITIES", json.dumps(["flutter", host_os]))
+        preflight = collect_preflight()
+        if preflight.get("host_os") != host_os:
+            raise ValueError("Runner host preflight OS does not match this machine")
+        raw_capabilities = os.environ.get("DCP_RUNNER_CAPABILITIES")
+        configured_capabilities = (
+            json.loads(raw_capabilities) if raw_capabilities is not None else None
         )
-        if not isinstance(raw_capabilities, list):
-            raise ValueError("DCP_RUNNER_CAPABILITIES must be a JSON string array")
+        capabilities = resolve_capabilities(preflight, configured_capabilities)
         pipeline = RunnerPipeline(
             client, manager, checkout, executor,
             trusted_repositories=frozenset(raw_repositories),
             worker_os=host_os,
-            capabilities=frozenset(raw_capabilities),
+            capabilities=frozenset(capabilities),
         )
         result = pipeline.run_once()
         if result is None:
