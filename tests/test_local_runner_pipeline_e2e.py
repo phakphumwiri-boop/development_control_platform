@@ -36,6 +36,7 @@ class _FixtureCheckout:
         source = self.manager.get(job_id, worker_id) / "source"
         source.mkdir()
         (source / "pubspec.yaml").write_text("name: fixture_app\n")
+        (source / "pubspec.lock").write_text("packages: {}\n", encoding="utf-8")
         (source / "lib").mkdir()
         (source / "lib" / "main.dart").write_text("void main() {}\n")
         if self.cancel_job:

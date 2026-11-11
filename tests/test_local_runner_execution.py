@@ -22,6 +22,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         (self.workspace / "pubspec.yaml").write_text(
             "name: fixture_app\n\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n"
         )
+        (self.workspace / "pubspec.lock").write_text("packages: {}\n", encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -61,6 +62,23 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             FlutterBuildExecutor._process_command(command, windows=False, executable=executable),
             list(command),
         )
+
+    def test_build_environment_isolates_caches_and_preserves_android_toolchain(self):
+        with patch.dict("os.environ", {
+            "ANDROID_SDK_ROOT": "C:/Android/Sdk",
+            "JAVA_HOME": "C:/Java",
+            "SystemRoot": "C:/Windows",
+            "COMSPEC": "C:/Windows/System32/cmd.exe",
+        }, clear=True):
+            env = FlutterBuildExecutor._execution_environment(self.workspace, windows=True)
+        self.assertEqual(env["ANDROID_SDK_ROOT"], "C:/Android/Sdk")
+        self.assertEqual(env["ANDROID_HOME"], "C:/Android/Sdk")
+        self.assertEqual(env["JAVA_HOME"], "C:/Java")
+        self.assertEqual(env["SystemRoot"], "C:/Windows")
+        self.assertEqual(env["COMSPEC"], "C:/Windows/System32/cmd.exe")
+        self.assertTrue(env["PUB_CACHE"].startswith(str(self.workspace)))
+        self.assertTrue(env["GRADLE_USER_HOME"].startswith(str(self.workspace)))
+        self.assertTrue(env["TMP"].startswith(str(self.workspace)))
 
     def test_windows_environment_preserves_sdk_paths_but_not_secrets(self):
         local_app_data = self.root / "original-user-local-appdata"
@@ -107,7 +125,13 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         flutter = bin_dir / "flutter"
-        flutter.write_text("#!/bin/sh\nprintf 'flutter-fixture-ok\\n'\nexit 0\n")
+        calls_file = self.root / "flutter-calls.txt"
+        flutter.write_text("\n".join([
+            "#!/bin/sh",
+            "printf '%s\\n' \"$*\" >> '" + str(calls_file) + "'",
+            "printf 'flutter-fixture-ok\\n'",
+            "exit 0",
+        ]) + "\n")
         flutter.chmod(0o700)
         old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
@@ -124,6 +148,38 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         self.assertEqual(result.return_code, 0)
         self.assertEqual(result.command, ("flutter", "test", "--no-pub"))
         self.assertTrue(any("flutter-fixture-ok" in message for _, message in logs))
+        self.assertEqual(
+            calls_file.read_text(encoding="utf-8").splitlines(),
+            ["pub get --enforce-lockfile", "test --no-pub"],
+        )
+
+    @unittest.skipIf(os.name == "nt", "POSIX fixture executable used for deterministic process tests")
+    def test_dependency_resolution_failure_prevents_target_execution(self):
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        calls_file = self.root / "flutter-calls.txt"
+        flutter = bin_dir / "flutter"
+        flutter.write_text("\n".join([
+            "#!/bin/sh",
+            "printf '%s\\n' \"$*\" >> '" + str(calls_file) + "'",
+            "if [ \"$1\" = \"pub\" ]; then exit 7; fi",
+            "exit 0",
+        ]) + "\n")
+        flutter.chmod(0o700)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
+        try:
+            executor = FlutterBuildExecutor(self.manager, enabled=True, timeout_seconds=10)
+            result = executor.run(self.job_id, self.worker, "test")
+        finally:
+            os.environ["PATH"] = old_path
+        self.assertEqual(result.outcome, "failed")
+        self.assertEqual(result.error_code, "DEPENDENCY_RESOLUTION_FAILED")
+        self.assertEqual(result.return_code, 7)
+        self.assertEqual(
+            calls_file.read_text(encoding="utf-8").splitlines(),
+            ["pub get --enforce-lockfile"],
+        )
 
     @unittest.skipIf(os.name == "nt", "POSIX fixture executable used for deterministic process tests")
     def test_timeout_terminates_process_group(self):
@@ -148,7 +204,13 @@ class FlutterBuildExecutorTests(unittest.TestCase):
     def test_requires_project_manifest(self):
         (self.workspace / "pubspec.yaml").unlink()
         executor = FlutterBuildExecutor(self.manager, enabled=True)
-        with self.assertRaises(ExecutionError):
+        with self.assertRaisesRegex(ExecutionError, "manifest"):
+            executor.run(self.job_id, self.worker, "test")
+
+    def test_requires_committed_lockfile(self):
+        (self.workspace / "pubspec.lock").unlink()
+        executor = FlutterBuildExecutor(self.manager, enabled=True)
+        with self.assertRaisesRegex(ExecutionError, "lockfile"):
             executor.run(self.job_id, self.worker, "test")
 
 
@@ -161,7 +223,7 @@ class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
         flutter_cmd = bin_dir / "flutter.cmd"
         flutter_cmd.write_text(
             "@echo off\r\n"
-            + "echo %* > \"" + str(args_file) + "\"\r\n"
+            + "echo %* >> \"" + str(args_file) + "\"\r\n"
             + "exit /b 0\r\n",
             encoding="utf-8",
         )
@@ -174,7 +236,10 @@ class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
             result = executor.run(self.job_id, self.worker, "test")
         self.assertEqual(result.outcome, "succeeded")
         self.assertEqual(result.return_code, 0)
-        self.assertEqual(args_file.read_text(encoding="utf-8").strip(), "test --no-pub")
+        self.assertEqual(
+            [line.strip() for line in args_file.read_text(encoding="utf-8").splitlines()],
+            ["pub get --enforce-lockfile", "test --no-pub"],
+        )
 
 
 if __name__ == "__main__":
