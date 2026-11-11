@@ -126,6 +126,32 @@ The command processes no more than one queued job. The host must have the Flutte
 - Retention pruning is available through `ArtifactStore.prune(retention_days=30)`; scheduling retention is an operator responsibility and is not enabled automatically in this increment.
 
 
+## Local Windows Runner setup
+
+The local Windows stack can provision a dedicated Runner credential without placing the token in source control or printing it to the console.
+
+1. Run `Setup-DCP-Local-Runner.cmd`. It creates or reuses a worker credential in `%LOCALAPPDATA%\DCP\runner-tokens.json`, protects the file with a current-user/SYSTEM/Administrators Windows ACL, and does not display the token.
+2. Stop the existing DCP stack with Ctrl+C in its stack PowerShell window, then restart it with `Start-DCP-Local.cmd`. The Local Auth Proxy loads the protected credential map into the Gateway process at startup.
+3. Enroll the host offline first:
+
+   ```powershell
+   .\Start-DCP-Local-Runner.cmd -WorkerId windows-local-01
+   ```
+
+   This calls `--enroll-only`; the Runner appears offline and cannot claim jobs.
+4. Only after reviewing the trusted repository and host preflight, explicitly enable execution for one repository:
+
+   ```powershell
+   .\Start-DCP-Local-Runner.cmd -WorkerId windows-local-01 -EnableExecution -TrustedRepository "owner/repository" -Once
+   ```
+
+   Omit `-Once` to run the worker loop until Ctrl+C. Execution is never enabled by the setup command or offline-enrollment default.
+
+The Gateway listens on loopback port 18790; the Dashboard remains on 8789. The Gateway reads the protected token map at startup; Runner tokens are never injected into build subprocesses. Build subprocesses receive only the safe OS/toolchain environment allowlist. Cloud Provisioning remains disabled.
+
+If the credential file is created or changed while the Gateway is running, restart the local stack before enrollment so the Gateway reloads the worker token map.
+
+
 ## M8 — Local Runner Fleet Registry
 
 - The Gateway keeps a persistent inventory of local Runner workers, host OS, declared capabilities, registration time, last-seen time, and state (`online`, `draining`, `offline`). Configure its database with `DCP_GATEWAY_RUNNERS_DATABASE` (default `<DCP_GATEWAY_DATABASE>.runners`) and stale timeout with `DCP_GATEWAY_RUNNER_STALE_SECONDS`.
