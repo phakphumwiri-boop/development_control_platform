@@ -22,6 +22,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         (self.workspace / "pubspec.yaml").write_text(
             "name: fixture_app\n\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n"
         )
+        (self.workspace / "pubspec.lock").write_text("packages: {}\n", encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -72,7 +73,13 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         flutter = bin_dir / "flutter"
-        flutter.write_text("#!/bin/sh\nprintf 'flutter-fixture-ok\\n'\nexit 0\n")
+        calls_file = self.root / "flutter-calls.txt"
+        flutter.write_text(
+            "#!/bin/sh\n"
+            + "printf '%s\\n' \"$*\" >> '" + str(calls_file) + "'\n"
+            + "printf 'flutter-fixture-ok\\n'\n"
+            + "exit 0\n"
+        )
         flutter.chmod(0o700)
         old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
@@ -136,7 +143,7 @@ class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
         flutter_cmd = bin_dir / "flutter.cmd"
         flutter_cmd.write_text(
             "@echo off\r\n"
-            + "echo %* > \"" + str(args_file) + "\"\r\n"
+            + "echo %* >> \"" + str(args_file) + "\"\r\n"
             + "exit /b 0\r\n",
             encoding="utf-8",
         )
