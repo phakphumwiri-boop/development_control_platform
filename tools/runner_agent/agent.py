@@ -416,8 +416,9 @@ class RunnerAgent:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="DCP local Runner Agent")
-    parser.add_argument("--once", action="store_true", help="claim and process at most one job")
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--once", action="store_true", help="claim and process at most one job")
+    modes.add_argument(
         "--enroll-only", action="store_true",
         help="register this host as offline; never ping, claim, checkout, or execute jobs",
     )
@@ -426,13 +427,11 @@ def main(argv=None):
     token = os.environ.get("DCP_RUNNER_TOKEN", "")
     worker = os.environ.get("DCP_RUNNER_ID", "").strip()
     configured_caps = os.environ.get("DCP_RUNNER_CAPABILITIES", "").strip()
-    if not base_url.startswith("https://") and not base_url.startswith("http://127.0.0.1"):
-        parser.error("DCP_GATEWAY_URL must use HTTPS (HTTP is allowed only for loopback)")
-    if len(token) < 32 or not worker:
-        parser.error("Set DCP_RUNNER_ID and a DCP_RUNNER_TOKEN of at least 32 characters")
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker):
+        parser.error("DCP_RUNNER_ID is invalid")
+    if len(token) < 32:
+        parser.error("DCP_RUNNER_TOKEN must contain at least 32 characters")
 
-    # Both enrollment and execution use the same conservative, local-only probe.
-    # Capabilities explicitly configured by an operator may only reduce the detected set.
     report = collect_preflight()
     current_host = host_os()
     if report.get("host_os") != current_host:
@@ -443,14 +442,13 @@ def main(argv=None):
     )
     try:
         caps = resolve_capabilities(report, configured)
+        client = GatewayClient(base_url, token)
     except ValueError as exc:
         parser.error(str(exc))
 
-    client = GatewayClient(base_url, token)
     if args.enroll_only:
-        # This endpoint persists an offline registration. It cannot receive work.
         result = client.enroll(current_host, caps)
-        runner = result.get("runner", {})
+        runner = result.get("runner", {}) if isinstance(result, dict) else {}
         print(json.dumps({
             "enrolled": True,
             "worker_id": runner.get("worker_id", worker),
@@ -463,12 +461,35 @@ def main(argv=None):
 
     if os.environ.get("DCP_RUNNER_EXECUTION_ENABLED", "").lower() != "true":
         parser.error("Execution is disabled. Use --enroll-only to register without executing jobs.")
-    client.register(current_host, caps)
-    agent = RunnerAgent(client, worker, caps)
+    try:
+        raw_repositories = json.loads(os.environ.get("DCP_RUNNER_TRUSTED_REPOSITORIES", "[]"))
+    except (TypeError, ValueError):
+        parser.error("DCP_RUNNER_TRUSTED_REPOSITORIES must be a JSON string array")
+    if (
+        not isinstance(raw_repositories, list)
+        or not raw_repositories
+        or any(
+            not isinstance(item, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", item)
+            for item in raw_repositories
+        )
+        or len(raw_repositories) != len(set(raw_repositories))
+    ):
+        parser.error("DCP_RUNNER_TRUSTED_REPOSITORIES must contain unique owner/repository names")
+
+    try:
+        client.register(current_host, caps)
+    except GatewayError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    agent = RunnerAgent(
+        client, worker, caps, trusted_repositories=frozenset(raw_repositories)
+    )
     while True:
-        client.ping()
         try:
+            client.ping()
             job = client.claim(120)
+            job_failed = False
             if job:
                 try:
                     agent.execute(job)
@@ -478,11 +499,17 @@ def main(argv=None):
                     except Exception:
                         pass
                 except Exception as exc:
+                    job_failed = True
                     try:
-                        client.log(job["id"], "Execution failed: " + str(exc), "stderr")
-                        client.finish(job["id"], "failed", {"message": str(exc)}, "RUNNER_EXECUTION_FAILED")
+                        client.log(job["id"], "Execution failed safely: " + type(exc).__name__, "stderr")
+                        client.finish(
+                            job["id"], "failed", {"error": type(exc).__name__},
+                            "RUNNER_EXECUTION_FAILED",
+                        )
                     except Exception:
                         pass
+            if args.once:
+                return 1 if job_failed else 0
         except GatewayError as exc:
             print(str(exc), file=sys.stderr)
             if args.once:
