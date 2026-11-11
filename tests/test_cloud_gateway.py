@@ -37,7 +37,7 @@ class PolicyTests(unittest.TestCase):
    with self.subTest(code=code),self.assertRaises(PolicyDenied) as e: s.authorize_provisioning(count)
    self.assertEqual(e.exception.status_code,code)
  def test_repository_dot_segments_are_rejected(self):
-  for repository in ("../repo","owner/..",". /repo"):
+  for repository in ("../repo","owner/..","./repo","owner/."):
    with self.subTest(repository=repository):
     invalid_settings=settings(allowed_repositories=(repository,))
     with self.assertRaises(ValueError):
