@@ -82,6 +82,27 @@ class FlutterBuildExecutor:
         return ("flutter", *_COMMANDS[target])
 
     @staticmethod
+    def _trusted_windows_command_processor(environ=None) -> str:
+        inherited = os.environ if environ is None else environ
+        system_root = inherited.get("SystemRoot", r"C:\Windows")
+        if not isinstance(system_root, str) or any(char in system_root for char in ('"', "%", "\r", "\n", "\x00")):
+            raise ExecutionError("Windows SystemRoot path is unsafe")
+        system_path = PureWindowsPath(system_root)
+        if (
+            not system_path.is_absolute()
+            or len(system_path.drive) != 2
+            or system_path.drive[1] != ":"
+            or not system_path.drive[0].isalpha()
+        ):
+            raise ExecutionError("Windows SystemRoot must be an absolute local path")
+        trusted = system_path / "System32" / "cmd.exe"
+        comspec = inherited.get("COMSPEC")
+        if comspec:
+            if not isinstance(comspec, str) or PureWindowsPath(comspec) != trusted:
+                raise ExecutionError("COMSPEC must resolve to SystemRoot\\System32\\cmd.exe")
+        return str(trusted)
+
+    @staticmethod
     def _process_command(command: tuple[str, ...], *, windows: bool | None = None,
                          executable: str | None = None) -> list[str] | str:
         """Resolve Flutter to an absolute executable and safely invoke Windows batch shims.
@@ -113,23 +134,7 @@ class FlutterBuildExecutor:
         if executable_path.suffix.lower() not in (".bat", ".cmd"):
             return [resolved, *command[1:]]
 
-        command_processor = os.environ.get("COMSPEC") or str(
-            PureWindowsPath(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
-        )
-        if (
-            not isinstance(command_processor, str)
-            or any(char in command_processor for char in ('"', "%", "\r", "\n", "\x00"))
-        ):
-            raise ExecutionError("Windows command processor path is unsafe")
-        processor_path = PureWindowsPath(command_processor)
-        if (
-            not processor_path.is_absolute()
-            or len(processor_path.drive) != 2
-            or processor_path.drive[1] != ":"
-            or not processor_path.drive[0].isalpha()
-            or processor_path.name.lower() != "cmd.exe"
-        ):
-            raise ExecutionError("Windows command processor must be the trusted cmd.exe")
+        command_processor = FlutterBuildExecutor._trusted_windows_command_processor()
 
         arguments = subprocess.list2cmdline(list(command[1:]))
         command_line = f'"{resolved}"' + (f" {arguments}" if arguments else "")
@@ -186,6 +191,7 @@ class FlutterBuildExecutor:
                 value = inherited.get(name)
                 if isinstance(value, str) and value and "\\x00" not in value:
                     env[name] = value
+            env["COMSPEC"] = FlutterBuildExecutor._trusted_windows_command_processor(inherited)
 
             # Android tooling uses both names across Flutter/Gradle versions.
             # If the host supplies either variable, expose the same SDK through
