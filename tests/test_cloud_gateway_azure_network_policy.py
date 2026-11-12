@@ -75,6 +75,11 @@ class VerifierTests(unittest.TestCase):
         default_rule["value"][0]["effectiveSecurityRules"][0]["priority"]=65001
         with self.assertRaises(EffectiveNetworkPolicyError):
             self.make(FakeArm(nsg=default_rule)).verify_nic(NIC,NSG,SUBNET)
+    def test_broader_destination_allow_does_not_satisfy_exact_allowlist(self):
+        body=nsg_body()
+        body["value"][0]["effectiveSecurityRules"][0]["destinationAddressPrefix"]="198.51.0.0/16"
+        with self.assertRaises(EffectiveNetworkPolicyError):
+            self.make(FakeArm(nsg=body)).verify_nic(NIC,NSG,SUBNET)
     def test_outbound_allow_rule_must_match_actual_nic_source_ip(self):
         body=nsg_body()
         body["value"][0]["effectiveSecurityRules"][0]["sourceAddressPrefix"]="10.99.0.0/16"
