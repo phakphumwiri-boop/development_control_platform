@@ -109,3 +109,46 @@ references. Then run browser acceptance for login, logout, invalid issuer,
 invalid audience, expiry, nonce/state mismatch, CSRF, role denial, direct API
 header spoofing, replay across process restarts, and iPhone Safari. Do not
 enable provider provisioning as part of OIDC setup.
+
+
+## Repository implementation status (provider-neutral)
+
+The repository now includes the following reusable server-side building blocks:
+
+- `oidc_config.py`: HTTPS issuer/client/callback and scope validation.
+- `oidc_client.py`: Discovery metadata checks, JWKS retrieval through an
+  injected transport, PKCE S256, authorization-code exchange, and RS256/ES256
+  ID-token signature and claim verification.
+- `oidc_session_store.py`: durable one-time state transactions bound to a
+  browser binding, SQLite-backed session lookup, CSRF token validation,
+  session rotation and revocation.
+- `oidc_auth_service.py`: begin-login and callback orchestration, verified
+  group-to-role mapping, server-only session handles, and Secure/HttpOnly
+  cookie builders.
+- Offline regression tests cover invalid signatures, issuer/audience/nonce,
+  expired tokens, algorithm rejection, key ambiguity, PKCE, state replay,
+  browser binding, session rotation and logout.
+
+The callback service is a library boundary, not a deployed HTTP route. The
+existing local password proxy does not automatically switch to OIDC. A
+production HTTPS host must instantiate this service, provide TLS-verified
+bounded transports, bind the browser transaction to a pre-auth session cookie,
+set the returned cookie, and protect the callback route with exact origin and
+redirect handling. The cookie builder emits Secure cookies and therefore must
+not be used on the current loopback HTTP-only development listener.
+
+The local proxy creates a fresh signed Gateway assertion from its authenticated
+server-side session and does not forward arbitrary browser headers. An
+end-to-end regression test now supplies forged `X-DCP-*` values and confirms
+they do not replace the proxy-generated identity. Any separately deployed
+reverse proxy must still strip all incoming `X-DCP-*` headers before calling
+the trusted signer.
+
+## Required live deployment configuration
+
+Live sign-in remains disabled until an operator supplies and verifies the
+selected provider's exact issuer, client ID, audience/authorized-party
+requirements, callback URI, owner and operator group identifiers, public HTTPS
+origin, and secret-store references. Provider secrets must be injected into
+the server environment or secret manager, never committed or sent to browser
+code. No provider tenant or cloud resource is created by CI.
