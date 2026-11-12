@@ -31,8 +31,8 @@ def route_body(next_hop=FW, state="Active"):
 class FakeArm:
     subscription_id=SUB
     def __init__(self,nsg=None,routes=None,responses=None):
-        self.nsg=nsg or nsg_body()
-        self.routes=routes or route_body()
+        self.nsg=nsg if nsg is not None else nsg_body()
+        self.routes=routes if routes is not None else route_body()
         self.responses=list(responses or [])
         self.calls=[]
     def resource_url(self,provider,kind,name,version):
@@ -65,6 +65,10 @@ class VerifierTests(unittest.TestCase):
     def test_denies_default_allow_without_explicit_allow_rule(self):
         with self.assertRaises(EffectiveNetworkPolicyError):
             self.make(FakeArm(nsg=nsg_body(include_rules=False))).verify_nic(NIC,NSG,SUBNET)
+        default_rule=nsg_body()
+        default_rule["value"][0]["effectiveSecurityRules"][0]["priority"]=65001
+        with self.assertRaises(EffectiveNetworkPolicyError):
+            self.make(FakeArm(nsg=default_rule)).verify_nic(NIC,NSG,SUBNET)
     def test_missing_nsg_or_route_data_fails_closed(self):
         for arm in (FakeArm(nsg={}),FakeArm(routes={})):
             with self.assertRaises(EffectiveNetworkPolicyError):
