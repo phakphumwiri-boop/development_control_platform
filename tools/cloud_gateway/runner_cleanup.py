@@ -28,7 +28,7 @@ class GitHubRunnerCleanup:
         if runner is None:
             return "already_absent"
         if runner["status"] != "offline":
-            raise GitHubAppError("Refusing cleanup until the GitHub runner is offline")
+            raise GitHubAppError("GitHub runner is not confirmed offline; refusing cleanup")
         if self.github_app.remove_runner(repository, runner["id"]) is not True:
             raise GitHubAppError("GitHub runner deregistration request was not confirmed")
         remaining = self.github_app.find_runner(repository, runner_name)
