@@ -147,7 +147,7 @@ Required evidence: sanitized ARM responses for both effective operations, timest
 - [ ] Dashboard and API share one HTTPS origin.
 - [ ] Secrets are in Key Vault; managed identity permissions are least-privilege.
 - [ ] SQLite persistence and backup/restore are proven, or the store is migrated to a shared transactional database before scaling.
-- [ ] Real Azure provider composition is implemented and reviewed; no `DisabledProvider` remains in the production path.
+- [ ] Azure provider factory is explicitly enabled for the approved Linux/Windows profiles; Orka remains disabled until its separate acceptance.
 - [ ] Guest login, egress restrictions, runner online/job/teardown, GitHub deregistration, and orphan cleanup pass live tests.
 - [ ] Live provider budget gate fails closed on missing, stale, or unavailable budget data.
 - [ ] Production owner approval and rollback procedure are recorded.
