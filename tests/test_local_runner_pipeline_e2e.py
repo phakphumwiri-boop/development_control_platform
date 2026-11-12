@@ -36,6 +36,7 @@ class _FixtureCheckout:
         source = self.manager.get(job_id, worker_id) / "source"
         source.mkdir()
         (source / "pubspec.yaml").write_text("name: fixture_app\n")
+        (source / "pubspec.lock").write_text("packages: {}\n", encoding="utf-8")
         (source / "lib").mkdir()
         (source / "lib" / "main.dart").write_text("void main() {}\n")
         if self.cancel_job:
@@ -188,6 +189,7 @@ class WindowsRunnerPipelineAcceptanceTests(RunnerPipelineEndToEndTests):
         flutter_cmd = bin_dir / "flutter.cmd"
         flutter_cmd.write_text(
             "@echo off\r\n"
+            "if /I \"%1\"==\"pub\" if /I \"%2\"==\"get\" if /I \"%3\"==\"--enforce-lockfile\" exit /b 0\r\n"
             "if /I \"%1\"==\"build\" if /I \"%2\"==\"apk\" (\r\n"
             "  if not exist \"build\\app\\outputs\\flutter-apk\" mkdir \"build\\app\\outputs\\flutter-apk\"\r\n"
             "  > \"build\\app\\outputs\\flutter-apk\\app-release.apk\" echo dcp-fixture-apk\r\n"
