@@ -96,10 +96,30 @@ Do not set provisioning to true simply because the service starts. The current r
 
 ### Gate D — Azure runner adapter acceptance
 - Implement explicit runtime composition for the real Azure adapter; do not remove `DisabledProvider` as a blanket shortcut.
+- Create the private NIC first, then call the ARM-backed effective-network verifier before issuing the VM create request. A failed, missing, malformed, stale/unknown, or timed-out result must delete/reconcile the NIC and must never fall through to VM creation.
+- The verifier must call the NIC `effectiveNetworkSecurityGroups` and `effectiveRouteTable` actions directly against Azure Resource Manager (Network API `2025-05-01`). It must bind the result to the exact NIC, configured subnet, and expected NSG resource ID.
+- Configure an owner-reviewed, non-empty outbound flow allowlist (protocol, destination port, destination CIDR) and the exact approved Azure Firewall/NVA next-hop IP. Every required flow must match an explicit effective outbound Allow rule in every applied NSG; default rules (priority 65000 or greater) do not count as authorization.
+- Require an active effective `0.0.0.0/0` route whose next-hop type is `VirtualAppliance` and whose next-hop IP equals the approved firewall/NVA address. Missing, inactive, Internet, VirtualNetworkGateway, unknown, or mismatched next hops fail closed.
+- Treat HTTP `202 Accepted` only as an asynchronous operation start. Require a trusted HTTPS `management.azure.com` Location, poll until a complete HTTP `200` result, and fail closed on missing Location, untrusted host, non-success response, or timeout. Do not cache effective-network results; verify immediately after NIC creation and before every VM create.
+- The verifier's managed identity needs only the required read/action permissions for the target NIC effective-network operations and the existing scoped NIC/VM lifecycle permissions. Do not grant NSG or route-table write permissions to the verifier.
 - Verify managed identity, resource-group scoping, VM SKU/image, guest login, ephemeral disk/data handling, outbound network policy, and deletion.
 - Verify GitHub App token creation, runner registration, online confirmation, one controlled test job, runner-offline confirmation, GitHub deregistration, VM deletion, and cleanup after cancellation/timeout.
 - Test failure injection at each lifecycle stage and prove that orphaned resources are reconciled.
 - Verify provider-specific live budget reads and hard denial when the budget source is unavailable or stale.
+
+
+#### Effective egress Live Acceptance (Azure subscription required)
+Mock tests prove parser and fail-closed behavior only. They do not prove Azure has applied the intended policy. Before enabling any real runner:
+1. In the approved subscription/resource group, create or select the owner-approved private subnet, NSG, route table, and Azure Firewall/NVA. Record their full resource IDs and the firewall private IP.
+2. Record the exact outbound destinations as CIDRs and ports. Confirm the list is sufficient for the approved GitHub runner registration, job checkout/artifact, and monitoring endpoints. Resolve and maintain changing service IP ranges through an owner-approved process; do not replace them with `Internet`, `*`, or unrestricted outbound access.
+3. Run the NIC effective NSG and effective route table ARM actions against a disposable private NIC with the same subnet and NSG association that production runners will use. Capture timestamps, request IDs, NIC/subnet/NSG IDs, effective rule names/priorities, route prefix/state/next-hop type/IP, and sanitized operation status.
+4. Prove each approved flow is explicitly allowed and that an unapproved destination/port is denied by the effective policy. Prove the default route uses the exact approved firewall/NVA next hop and that the firewall policy itself permits only the approved destinations.
+5. Repeat after changing NSG, subnet association, route table, firewall policy, or service endpoint ranges. Preserve the evidence with the release record.
+6. Run one controlled end-to-end connectivity test from the guest to approved destinations and a negative test to an unapproved destination. A successful ARM policy read alone does not prove firewall forwarding or guest-level reachability.
+7. Verify that a simulated or observed ARM `202 Accepted` is polled to completion and that missing/unknown/timed-out operations block VM creation. Confirm in Activity Log that the verifier made no NSG/route-table writes.
+8. Obtain owner sign-off for the exact allowlist, firewall IP, region, resource group, budget, and test evidence before any real VM provisioning.
+
+Required evidence: sanitized ARM responses for both effective operations, timestamps/request IDs, effective rules and routes, firewall policy export, guest connectivity test results, negative test result, CI report, and owner approval. Do not include access tokens, guest credentials, bootstrap payloads, or secrets.
 
 ### Gate E — controlled production enablement
 - Review test reports, cost estimates, threat model, backup/restore evidence, and rollback plan.
