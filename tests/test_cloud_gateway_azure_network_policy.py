@@ -24,8 +24,8 @@ def nsg_body(access="Allow", include_rules=True):
 
 def route_body(next_hop=FW, state="Active"):
     return {"value":[{
-        "addressPrefix":"0.0.0.0/0","nextHopType":"VirtualAppliance",
-        "nextHopIp":next_hop,"state":state
+        "addressPrefix":["0.0.0.0/0"],"nextHopType":"VirtualAppliance",
+        "nextHopIpAddress":[next_hop],"state":state
     }]}
 
 class FakeArm:
