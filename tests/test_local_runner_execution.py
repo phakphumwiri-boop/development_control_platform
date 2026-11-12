@@ -56,9 +56,10 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             ),
             [r"C:\Flutter\bin\flutter.exe", *command[1:]],
         )
+        posix_executable = str(self.root / "flutter")
         self.assertEqual(
-            FlutterBuildExecutor._process_command(command, windows=False, executable=executable),
-            [executable, *command[1:]],
+            FlutterBuildExecutor._process_command(command, windows=False, executable=posix_executable),
+            [posix_executable, *command[1:]],
         )
 
     def test_windows_batch_path_quotes_cmd_metacharacters_and_disables_expansion(self):
