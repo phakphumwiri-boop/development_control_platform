@@ -176,25 +176,25 @@ class AzureEffectiveNetworkPolicyVerifier:
             if not outbound:
                 raise EffectiveNetworkPolicyError("Effective outbound NSG rules are missing")
             for flow in self.required_outbound_flows:
-              for source_ip in source_ips:
-                candidates = []
-                for rule in outbound:
-                    protocol = rule.get("protocol")
-                    if protocol not in (flow["protocol"], "All"):
-                        continue
-                    if not self._port_matches(rule, flow["port"]):
-                        continue
-                    if not self._source_matches(rule, source_ip):
-                        continue
-                    if self._address_matches(rule, flow["destination"]):
-                        priority = rule.get("priority")
-                        if isinstance(priority, int) and not isinstance(priority, bool):
-                            candidates.append((priority, rule.get("access")))
-                if not candidates:
-                    raise EffectiveNetworkPolicyError("Required outbound flow has no effective rule for the NIC source IP")
-                priority, access = min(candidates, key=lambda item: item[0])
-                if access != "Allow" or priority >= 65000:
-                    raise EffectiveNetworkPolicyError("Required outbound flow is denied or only covered by a default rule")
+                for source_ip in source_ips:
+                    candidates = []
+                    for rule in outbound:
+                        protocol = rule.get("protocol")
+                        if protocol not in (flow["protocol"], "All"):
+                            continue
+                        if not self._port_matches(rule, flow["port"]):
+                            continue
+                        if not self._source_matches(rule, source_ip):
+                            continue
+                        if self._address_matches(rule, flow["destination"]):
+                            priority = rule.get("priority")
+                            if isinstance(priority, int) and not isinstance(priority, bool):
+                                candidates.append((priority, rule.get("access")))
+                    if not candidates:
+                        raise EffectiveNetworkPolicyError("Required outbound flow has no effective rule for the NIC source IP")
+                    priority, access = min(candidates, key=lambda item: item[0])
+                    if access != "Allow" or priority >= 65000:
+                        raise EffectiveNetworkPolicyError("Required outbound flow is denied or only covered by a default rule")
 
     def _verify_routes(self, body):
         routes = body.get("value")
