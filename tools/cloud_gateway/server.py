@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from .policy import GatewaySettings, PolicyDenied, valid_repository_name
 from .service import GatewayService
 from .provider_router import ProviderRouter
+from .azure_runtime import AzureRuntimeConfigurationError, build_azure_provider_from_env
 from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
 from .public_github import PublicGitHubRepositoryCatalog
@@ -32,7 +33,7 @@ from .recon_api import ReconAPIError, fetch_recon_resource
 
 
 class DisabledProvider:
-    """Fail-closed provider used until runner bootstrap is implemented and verified."""
+    """Fail-closed provider used whenever a provider adapter is not explicitly enabled."""
 
     def provision(self, payload):
         raise RuntimeError("No provider adapter configured")
@@ -42,6 +43,20 @@ class DisabledProvider:
 
     def terminate(self, rid):
         raise RuntimeError("No provider adapter configured")
+
+
+def _provider_router_from_env(env, github_app, runner_online_checker):
+    """Compose Azure only after an explicit adapter opt-in; Orka remains disabled."""
+    try:
+        azure_provider = build_azure_provider_from_env(
+            env, github_app, runner_online_checker
+        )
+    except AzureRuntimeConfigurationError as exc:
+        raise SystemExit(str(exc)) from exc
+    return ProviderRouter(
+        azure_provider if azure_provider is not None else DisabledProvider(),
+        DisabledProvider(),
+    )
 
 
 class ProxyIdentityVerifier:
@@ -952,7 +967,7 @@ def main():
         raise SystemExit("DCP_RUNNER_TOKENS must be a JSON object") from exc
     if not isinstance(runner_tokens, dict):
         raise SystemExit("DCP_RUNNER_TOKENS must be a JSON object")
-    github_app, _, runner_cleanup = build_github_app_runtime(settings)
+    github_app, runner_online_checker, runner_cleanup = build_github_app_runtime(settings)
     if github_app:
         repository_catalog = github_app.list_installation_repositories
         repository_authorizer = lambda repository: github_app.is_repository_accessible(repository, refresh=True)
@@ -969,8 +984,11 @@ def main():
         repository_ref_catalog = public_catalog.list_repository_refs
         repository_commit_resolver = public_catalog.resolve_repository_commit
         repository_project_inspector = public_catalog.inspect_repository_project
+    provider_router = _provider_router_from_env(
+        os.environ, github_app, runner_online_checker
+    )
     service = GatewayService(
-        settings, store, ProviderRouter(DisabledProvider(), DisabledProvider()),
+        settings, store, provider_router,
         _budget_guard_from_env(settings), runner_cleanup=runner_cleanup,
         repository_catalog=repository_catalog,
         repository_authorizer=repository_authorizer,
