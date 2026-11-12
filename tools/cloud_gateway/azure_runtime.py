@@ -65,6 +65,48 @@ def _required_values(env: Mapping[str, str]) -> dict[str, str]:
     return {name: env[name].strip() for name in _REQUIRED}
 
 
+def _validate_static_configuration(config: Mapping[str, str]) -> None:
+    subscription = config["DCP_AZURE_SUBSCRIPTION_ID"]
+    if not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        subscription,
+    ):
+        raise AzureRuntimeConfigurationError("Azure subscription ID is invalid")
+    if not re.fullmatch(r"[A-Za-z0-9_.()-]{1,90}", config["DCP_AZURE_RESOURCE_GROUP"]):
+        raise AzureRuntimeConfigurationError("Azure resource group is invalid")
+    if not re.fullmatch(r"[a-z0-9]+", config["DCP_AZURE_LOCATION"]):
+        raise AzureRuntimeConfigurationError("Azure location is invalid")
+    subnet_pattern = (
+        r"^/subscriptions/" + re.escape(subscription)
+        + r"/resourceGroups/[A-Za-z0-9_.()-]{1,90}/providers/Microsoft\\.Network/"
+        + r"virtualNetworks/[^/]+/subnets/[^/]+$"
+    )
+    nsg_pattern = (
+        r"^/subscriptions/" + re.escape(subscription)
+        + r"/resourceGroups/[A-Za-z0-9_.()-]{1,90}/providers/Microsoft\\.Network/"
+        + r"networkSecurityGroups/[^/]+$"
+    )
+    if not re.fullmatch(subnet_pattern, config["DCP_AZURE_SUBNET_ID"], re.IGNORECASE):
+        raise AzureRuntimeConfigurationError("Azure subnet resource ID is invalid")
+    if not re.fullmatch(nsg_pattern, config["DCP_AZURE_NSG_ID"], re.IGNORECASE):
+        raise AzureRuntimeConfigurationError("Azure NSG resource ID is invalid")
+    for os_name in ("linux", "windows"):
+        username = config[f"DCP_AZURE_{os_name.upper()}_ADMIN_USERNAME"]
+        if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username) or username in {
+            "root", "admin", "administrator", "guest"
+        }:
+            raise AzureRuntimeConfigurationError("Azure guest administrator username is invalid")
+        secret_name = config[
+            "DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME"
+            if os_name == "linux" else "DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME"
+        ]
+        if not re.fullmatch(r"[A-Za-z0-9-]{1,127}", secret_name):
+            raise AzureRuntimeConfigurationError("Azure guest Key Vault secret name is invalid")
+    for value in config.values():
+        if not isinstance(value, str):
+            raise AzureRuntimeConfigurationError("Azure provider configuration contains a non-string value")
+
+
 def _validate_egress_configuration(config: Mapping[str, str], flows) -> None:
     try:
         firewall = ipaddress.ip_address(config["DCP_AZURE_EXPECTED_FIREWALL_IP"])
@@ -163,6 +205,7 @@ def build_azure_provider_from_env(env, github_app, runner_online_checker):
         )
 
     config = _required_values(values)
+    _validate_static_configuration(config)
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,63}", config["DCP_AZURE_BUDGET_NAME"]):
         raise AzureRuntimeConfigurationError("Azure budget name is invalid")
     try:
