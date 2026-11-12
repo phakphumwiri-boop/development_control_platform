@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same PR/branch to avoid stale queued runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux-minimal-emulator:
     name: Linux Minimal Emulator (Gateway + health + safe defaults)
@@ -18,12 +23,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install Gateway runtime dependency
-        run: python -m pip install --disable-pip-version-check -r requirements-cloud-gateway.txt
-      - name: Install test dependencies
-        run: |
-          python -m pip install --disable-pip-version-check PyYAML
-          python -m pip install --disable-pip-version-check -r requirements-mcp.txt
+          cache: pip
+          cache-dependency-path: |
+            requirements-cloud-gateway.txt
+            requirements-mcp.txt
+      - name: Install Gateway and test dependencies
+        run: python -m pip install --disable-pip-version-check PyYAML -r requirements-cloud-gateway.txt -r requirements-mcp.txt
       - name: Run local diagnostics and unit tests
         env:
           DCP_GATEWAY_PROVISIONING_ENABLED: "false"
@@ -90,6 +95,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-cloud-gateway.txt
       - name: Install Gateway runtime dependency
         run: python -m pip install --disable-pip-version-check -r requirements-cloud-gateway.txt
       - name: Parse all local PowerShell launchers
