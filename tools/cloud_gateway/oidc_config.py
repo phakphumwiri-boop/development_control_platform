@@ -47,7 +47,9 @@ def _https_url(value: object, field: str) -> str:
         raise OIDCConfigurationError(
             f"{field} must use HTTPS and must not contain credentials, query, or fragment"
         )
-    return value.rstrip("/") if field == "issuer" else value
+    # Preserve the issuer identifier exactly: OIDC compares the token iss claim
+    # byte-for-byte with the configured issuer, including a trailing slash.
+    return value
 
 
 def validate_oidc_config(config: OIDCProviderConfig) -> OIDCProviderConfig:
