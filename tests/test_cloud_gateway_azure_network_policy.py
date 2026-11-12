@@ -64,15 +64,15 @@ class VerifierTests(unittest.TestCase):
             self.make(FakeArm(nsg=nsg_body("Deny"))).verify_nic(NIC,NSG,SUBNET)
     def test_denies_default_allow_without_explicit_allow_rule(self):
         with self.assertRaises(EffectiveNetworkPolicyError):
-            self.make(FakeArm(nsg=nsg_body(include_rules=False))).verify_nic(NIC,NSG,"subnet")
+            self.make(FakeArm(nsg=nsg_body(include_rules=False))).verify_nic(NIC,NSG,SUBNET)
     def test_missing_nsg_or_route_data_fails_closed(self):
         for arm in (FakeArm(nsg={}),FakeArm(routes={})):
             with self.assertRaises(EffectiveNetworkPolicyError):
-                self.make(arm).verify_nic(NIC,NSG,"subnet")
+                self.make(arm).verify_nic(NIC,NSG,SUBNET)
     def test_wrong_next_hop_and_inactive_route_fail_closed(self):
         for routes in (route_body("10.20.0.9"),route_body(state="Invalid")):
             with self.assertRaises(EffectiveNetworkPolicyError):
-                self.make(FakeArm(routes=routes)).verify_nic(NIC,NSG,"subnet")
+                self.make(FakeArm(routes=routes)).verify_nic(NIC,NSG,SUBNET)
     def test_nic_and_nsg_scope_must_match(self):
         bad=NIC.replace("dcpnic12345678","othernic")
         with self.assertRaises(EffectiveNetworkPolicyError):
@@ -86,13 +86,13 @@ class VerifierTests(unittest.TestCase):
             (200,{},nsg_body()),
             (200,{},route_body())
         ])
-        self.assertTrue(self.make(arm).verify_nic(NIC,NSG,"subnet"))
+        self.assertTrue(self.make(arm).verify_nic(NIC,NSG,SUBNET))
         self.assertEqual([x[0] for x in arm.calls],["POST","GET","POST"])
     def test_202_without_location_or_with_untrusted_location_is_rejected(self):
         for headers in ({},{"Location":"https://attacker.example/operation"}):
             arm=FakeArm(responses=[(202,headers,{})])
             with self.assertRaises(EffectiveNetworkPolicyError):
-                self.make(arm).verify_nic(NIC,NSG,"subnet")
+                self.make(arm).verify_nic(NIC,NSG,SUBNET)
     def test_stale_or_unknown_async_operation_times_out_closed(self):
         location="https://management.azure.com/subscriptions/"+SUB+"/operationResults/op?api-version=2025-05-01"
         ticks=[0]
@@ -105,12 +105,12 @@ class VerifierTests(unittest.TestCase):
         ])
         verifier=self.make(arm,timeout_seconds=2,poll_interval=1,clock=clock,sleep=sleep)
         with self.assertRaises(EffectiveNetworkPolicyError):
-            verifier.verify_nic(NIC,NSG,"subnet")
+            verifier.verify_nic(NIC,NSG,SUBNET)
     def test_malformed_effective_rule_fails_closed(self):
         body=nsg_body()
         body["value"][0]["effectiveSecurityRules"]=[{"direction":"Outbound","access":"Allow"}]
         with self.assertRaises(EffectiveNetworkPolicyError):
-            self.make(FakeArm(nsg=body)).verify_nic(NIC,NSG,"subnet")
+            self.make(FakeArm(nsg=body)).verify_nic(NIC,NSG,SUBNET)
 
 if __name__=="__main__":
     unittest.main()
