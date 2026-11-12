@@ -19,12 +19,37 @@ class FakeGitHubApp:
         )
 
 
+def mock_os_profile(vm_name, os_name, payload):
+    """Return a complete, non-secret guest profile for script-generation tests."""
+    profile = {
+        # Windows computer names are limited to 15 characters; the generated
+        # VM resource name is intentionally not reused as the guest hostname.
+        "computerName": "dcpwinrunner01" if os_name == "windows" else vm_name,
+        "adminUsername": "dcpadmin",
+    }
+    if os_name == "linux":
+        profile["linuxConfiguration"] = {
+            "disablePasswordAuthentication": True,
+            "ssh": {
+                "publicKeys": [{
+                    "path": "/home/dcpadmin/.ssh/authorized_keys",
+                    # Synthetic test key material only; never used for a VM.
+                    "keyData": "ssh-ed25519 YWJjZGVmZ2hpamtsbW5vcA== dcp-test",
+                }]
+            },
+        }
+    elif os_name == "windows":
+        profile["adminPassword"] = "Test-Only-Password-123!"
+    else:
+        raise ValueError(f"Unsupported test OS: {os_name}")
+    return profile
+
+
 def main():
     output = Path(sys.argv[1])
     output.mkdir(parents=True, exist_ok=True)
     factory = AzureRunnerBootstrapFactory(
-        FakeGitHubApp(), "2.331.0", "a" * 64, "b" * 64,
-        lambda vm, os_name, payload: {"computerName": vm},
+        FakeGitHubApp(), "2.331.0", "a" * 64, "b" * 64, mock_os_profile,
     )
     profiles = {
         "linux": ["self-hosted", "Linux", "X64", "dcp-cloud-linux"],
