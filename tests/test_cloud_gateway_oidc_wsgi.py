@@ -64,6 +64,10 @@ class OIDCWSGITests(unittest.TestCase):
         body = b"".join(self.app(environ, start_response))
         return captured, body
 
+    def test_rejects_backslash_post_login_redirect(self):
+        with self.assertRaises(ValueError):
+            OIDCWSGIApplication(self.auth, "https://dcp.example.test", "/\\\\attacker.example")
+
     def test_login_requires_https_and_sets_http_only_binding_cookie(self):
         result, _ = self.call("/api/auth/oidc/login", scheme="http")
         self.assertEqual(result["status"], "400 Bad Request")
