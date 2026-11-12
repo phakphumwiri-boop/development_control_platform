@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hmac
 import time
+import re
 from urllib.parse import parse_qs, urlsplit
 
 from .oidc_assertion import map_oidc_groups
@@ -78,7 +79,7 @@ class OIDCAuthService:
     @staticmethod
     def session_cookie(session_id: str, max_age: int = 43200) -> str:
         """Build a production HTTPS cookie; callers must serve this on the configured HTTPS origin."""
-        if not isinstance(session_id, str) or not session_id or any(c in session_id for c in ";, \\r\\n"):
+        if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", session_id):
             raise OIDCError("Invalid session identifier for cookie")
         if isinstance(max_age, bool) or not isinstance(max_age, int) or not 300 <= max_age <= 86400:
             raise OIDCError("Cookie max-age must be 300..86400 seconds")
