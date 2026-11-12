@@ -28,6 +28,11 @@ class OIDCConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(config.scopes[0], "openid")
 
+    def test_preserves_issuer_identifier_exactly(self):
+        config = validate_oidc_config(self.valid(issuer="https://identity.example.test/"))
+        self.assertEqual(config.issuer, "https://identity.example.test/")
+        self.assertEqual(config.discovery_url, "https://identity.example.test/.well-known/openid-configuration")
+
     def test_rejects_non_https_issuer_and_redirect(self):
         with self.assertRaises(OIDCConfigurationError):
             validate_oidc_config(self.valid(issuer="http://identity.example.test"))
