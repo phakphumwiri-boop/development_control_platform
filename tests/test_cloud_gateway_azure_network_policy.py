@@ -37,6 +37,12 @@ class FakeArm:
         self.calls=[]
     def resource_url(self,provider,kind,name,version):
         return f"https://management.azure.com/subscriptions/{SUB}/resourceGroups/dcp/providers/{provider}/{kind}/{name}?api-version={version}"
+    def request(self,method,url,payload=None,allow_missing=False):
+        self.calls.append((method,url,payload))
+        if method=="GET" and "networkInterfaces/" in url:
+            return {"properties":{"provisioningState":"Succeeded"}}
+        return {}
+
     def request_with_metadata(self,method,url,payload=None):
         self.calls.append((method,url,payload))
         if self.responses:
