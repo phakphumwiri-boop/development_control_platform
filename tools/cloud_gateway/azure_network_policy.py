@@ -124,7 +124,7 @@ class AzureEffectiveNetworkPolicyVerifier:
                 continue
         return False
 
-    def _verify_nsg(self, body, nic_id):
+    def _verify_nsg(self, body, nic_id, subnet_id):
         groups = body.get("value")
         if not isinstance(groups, list) or not groups:
             raise EffectiveNetworkPolicyError("Effective NSG response contains no applied NSGs")
@@ -135,8 +135,11 @@ class AzureEffectiveNetworkPolicyVerifier:
                 raise EffectiveNetworkPolicyError("Effective NSG entry is malformed")
             association = group.get("association", {})
             associated_nic = association.get("networkInterface", {}).get("id")
-            if associated_nic and associated_nic.rstrip("/").lower() != nic_id.rstrip("/").lower():
-                raise EffectiveNetworkPolicyError("Effective NSG response belongs to a different NIC")
+            associated_subnet = association.get("subnet", {}).get("id")
+            if not isinstance(associated_nic, str) or associated_nic.rstrip("/").lower() != nic_id.rstrip("/").lower():
+                raise EffectiveNetworkPolicyError("Effective NSG response does not identify the expected NIC")
+            if not isinstance(associated_subnet, str) or associated_subnet.rstrip("/").lower() != subnet_id.rstrip("/").lower():
+                raise EffectiveNetworkPolicyError("Effective NSG response does not identify the expected subnet")
             nsg = group.get("networkSecurityGroup", {}).get("id")
             if nsg and nsg.rstrip("/").lower() == self.expected_nsg_id:
                 matched_nsg = True
@@ -206,7 +209,7 @@ class AzureEffectiveNetworkPolicyVerifier:
             route_url = nic_url + "/effectiveRouteTable?api-version=" + API_NETWORK
             nsg = self._arm_result("POST", nsg_url, {})
             routes = self._arm_result("POST", route_url, {})
-            self._verify_nsg(nsg, nic_id)
+            self._verify_nsg(nsg, nic_id, subnet_id)
             self._verify_routes(routes)
             return True
         except EffectiveNetworkPolicyError:
