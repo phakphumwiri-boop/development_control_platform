@@ -27,7 +27,8 @@ class OIDCWSGIApplication:
                 or redirect.port != parsed_origin.port):
             raise ValueError("OIDC callback must use the configured public HTTPS origin")
         if (not isinstance(post_login_path, str) or not post_login_path.startswith("/")
-                or post_login_path.startswith("//") or "\r" in post_login_path or "\n" in post_login_path):
+                or post_login_path.startswith("//") or chr(92) in post_login_path
+                or "\r" in post_login_path or "\n" in post_login_path):
             raise ValueError("Post-login path must be a safe same-origin path")
         self.auth = auth_service
         self.public_origin = public_origin.rstrip("/")
