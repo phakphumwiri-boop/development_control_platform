@@ -47,6 +47,8 @@ def _valid_amount(value: str) -> bool:
 
 
 def _valid_firewall_ip(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
     try:
         address = ipaddress.ip_address(value)
     except (TypeError, ValueError):
@@ -63,6 +65,8 @@ def _valid_firewall_ip(value: str) -> bool:
 
 
 def _valid_outbound_flows(value: str) -> bool:
+    if not isinstance(value, str):
+        return False
     try:
         flows = json.loads(value)
     except (TypeError, ValueError):
@@ -100,6 +104,10 @@ def _valid_guest_profile_references(env: Mapping[str, str]) -> bool:
     windows_user = env.get("DCP_AZURE_WINDOWS_ADMIN_USERNAME", "")
     linux_key_name = env.get("DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME", "")
     windows_password_name = env.get("DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME", "")
+    if not all(isinstance(item, str) for item in (
+        linux_user, windows_user, linux_key_name, windows_password_name
+    )):
+        return False
     user_pattern = r"[a-z_][a-z0-9_-]{0,31}"
     reserved = {"root", "admin", "administrator", "guest"}
     return (
