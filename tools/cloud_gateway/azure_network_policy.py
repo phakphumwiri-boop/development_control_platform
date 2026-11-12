@@ -128,7 +128,25 @@ class AzureEffectiveNetworkPolicyVerifier:
                 continue
         return False
 
-    def _verify_nsg(self, body, nic_id, subnet_id):
+    @staticmethod
+    def _source_matches(rule, source):
+        prefixes = rule.get("sourceAddressPrefixes")
+        if prefixes is None:
+            prefixes = [rule.get("sourceAddressPrefix")]
+        expanded = rule.get("expandedSourceAddressPrefix", [])
+        if not isinstance(prefixes, list) or not isinstance(expanded, list):
+            return False
+        for prefix in prefixes + expanded:
+            if not isinstance(prefix, str):
+                continue
+            try:
+                if source in ipaddress.ip_network(prefix, strict=False):
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    def _verify_nsg(self, body, nic_id, subnet_id, source_ips):
         groups = body.get("value")
         if not isinstance(groups, list) or not groups:
             raise EffectiveNetworkPolicyError("Effective NSG response contains no applied NSGs")
@@ -158,6 +176,7 @@ class AzureEffectiveNetworkPolicyVerifier:
             if not outbound:
                 raise EffectiveNetworkPolicyError("Effective outbound NSG rules are missing")
             for flow in self.required_outbound_flows:
+              for source_ip in source_ips:
                 candidates = []
                 for rule in outbound:
                     protocol = rule.get("protocol")
@@ -165,12 +184,14 @@ class AzureEffectiveNetworkPolicyVerifier:
                         continue
                     if not self._port_matches(rule, flow["port"]):
                         continue
+                    if not self._source_matches(rule, source_ip):
+                        continue
                     if self._address_matches(rule, flow["destination"]):
                         priority = rule.get("priority")
                         if isinstance(priority, int) and not isinstance(priority, bool):
                             candidates.append((priority, rule.get("access")))
                 if not candidates:
-                    raise EffectiveNetworkPolicyError("Required outbound flow has no effective rule")
+                    raise EffectiveNetworkPolicyError("Required outbound flow has no effective rule for the NIC source IP")
                 priority, access = min(candidates, key=lambda item: item[0])
                 if access != "Allow" or priority >= 65000:
                     raise EffectiveNetworkPolicyError("Required outbound flow is denied or only covered by a default rule")
@@ -208,7 +229,23 @@ class AzureEffectiveNetworkPolicyVerifier:
             if isinstance(data, dict):
                 state = data.get("properties", {}).get("provisioningState")
                 if state == "Succeeded":
-                    return
+                    configurations = data.get("properties", {}).get("ipConfigurations")
+                    if not isinstance(configurations, list) or not configurations:
+                        raise EffectiveNetworkPolicyError("Azure NIC has no effective private IP configuration")
+                    addresses = []
+                    primary_count = 0
+                    for configuration in configurations:
+                        properties = configuration.get("properties", {}) if isinstance(configuration, dict) else {}
+                        address = properties.get("privateIPAddress")
+                        try:
+                            addresses.append(ipaddress.ip_address(address))
+                        except ValueError as exc:
+                            raise EffectiveNetworkPolicyError("Azure NIC private IP is missing or invalid") from exc
+                        if properties.get("primary") is True:
+                            primary_count += 1
+                    if primary_count != 1:
+                        raise EffectiveNetworkPolicyError("Azure NIC must have exactly one primary IP configuration")
+                    return tuple(addresses)
                 if state in ("Failed", "Canceled", "Deleting", "Deleted"):
                     raise EffectiveNetworkPolicyError("Azure NIC provisioning did not succeed")
             self.sleep(self.poll_interval or 1)
@@ -222,7 +259,7 @@ class AzureEffectiveNetworkPolicyVerifier:
             if f"/subscriptions/{self.arm.subscription_id.lower()}/" not in nic:
                 raise EffectiveNetworkPolicyError("NIC is outside the configured subscription")
             nic_name = nic.rsplit("/", 1)[-1]
-            self._wait_for_nic(nic_name)
+            source_ips = self._wait_for_nic(nic_name)
             nic_url = self.arm.resource_url(
                 "Microsoft.Network", "networkInterfaces",
                 nic_name, API_NETWORK
@@ -231,7 +268,7 @@ class AzureEffectiveNetworkPolicyVerifier:
             route_url = nic_url + "/effectiveRouteTable?api-version=" + API_NETWORK
             nsg = self._arm_result("POST", nsg_url, {})
             routes = self._arm_result("POST", route_url, {})
-            self._verify_nsg(nsg, nic_id, subnet_id)
+            self._verify_nsg(nsg, nic_id, subnet_id, source_ips)
             self._verify_routes(routes)
             return True
         except EffectiveNetworkPolicyError:
