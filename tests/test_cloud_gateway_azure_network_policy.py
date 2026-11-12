@@ -93,6 +93,12 @@ class VerifierTests(unittest.TestCase):
         for routes in (route_body("10.20.0.9"),route_body(state="Invalid")):
             with self.assertRaises(EffectiveNetworkPolicyError):
                 self.make(FakeArm(routes=routes)).verify_nic(NIC,NSG,SUBNET)
+    def test_invalid_overridden_default_route_does_not_override_active_firewall_route(self):
+        routes={"value":[
+            route_body("10.20.0.9",state="Invalid"),
+            route_body(FW,state="Active")
+        ]}
+        self.assertTrue(self.make(FakeArm(routes=routes)).verify_nic(NIC,NSG,SUBNET))
     def test_nic_and_nsg_scope_must_match(self):
         bad=NIC.replace("dcpnic12345678","othernic")
         with self.assertRaises(EffectiveNetworkPolicyError):
