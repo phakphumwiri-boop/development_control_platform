@@ -7,6 +7,7 @@ The adapter is disabled unless DCP_AZURE_PROVIDER_ENABLED=true.
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Mapping
 from urllib.parse import urlparse
@@ -128,7 +129,7 @@ def build_azure_provider_from_env(env, github_app, runner_online_checker):
         projected_cost = float(config["DCP_AZURE_PROJECTED_RUN_COST_USD"])
     except ValueError as exc:
         raise AzureRuntimeConfigurationError("Azure projected run cost is invalid") from exc
-    if not projected_cost > 0 or not __import__("math").isfinite(projected_cost):
+    if not projected_cost > 0 or not math.isfinite(projected_cost):
         raise AzureRuntimeConfigurationError("Azure projected run cost must be finite and positive")
     try:
         flows = json.loads(config["DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON"])
