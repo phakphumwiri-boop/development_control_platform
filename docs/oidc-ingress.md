@@ -123,19 +123,23 @@ The repository now includes the following reusable server-side building blocks:
   browser binding, SQLite-backed session lookup, CSRF token validation,
   session rotation and revocation.
 - `oidc_auth_service.py`: begin-login and callback orchestration, verified
-  group-to-role mapping, server-only session handles, and Secure/HttpOnly
-  cookie builders.
+  group-to-role mapping, server-only session handles, session rotation, logout,
+  and Secure/HttpOnly cookie builders.
+- `oidc_wsgi.py`: HTTPS-only login redirect, exact-host callback, session
+  introspection, CSRF-protected rotation/logout, and secure cookie handling.
 - Offline regression tests cover invalid signatures, issuer/audience/nonce,
   expired tokens, algorithm rejection, key ambiguity, PKCE, state replay,
   browser binding, session rotation and logout.
 
-The callback service is a library boundary, not a deployed HTTP route. The
-existing local password proxy does not automatically switch to OIDC. A
-production HTTPS host must instantiate this service, provide TLS-verified
-bounded transports, bind the browser transaction to a pre-auth session cookie,
-set the returned cookie, and protect the callback route with exact origin and
-redirect handling. The cookie builder emits Secure cookies and therefore must
-not be used on the current loopback HTTP-only development listener.
+The WSGI adapter provides deployable route handling but is not mounted by
+the current local password proxy or a production web host. A production HTTPS
+host must instantiate the service and adapter, provide TLS-verified bounded
+transports, and mount the adapter behind a trusted proxy that supplies the
+validated HTTPS scheme and Host. The adapter binds the browser transaction to
+a Secure/HttpOnly pre-auth cookie, enforces the exact callback host/path,
+issues a Secure/HttpOnly/SameSite session cookie, and protects rotation/logout
+with same-origin and CSRF checks. It must not be mounted on the current
+loopback HTTP-only development listener.
 
 The local proxy creates a fresh signed Gateway assertion from its authenticated
 server-side session and does not forward arbitrary browser headers. An
