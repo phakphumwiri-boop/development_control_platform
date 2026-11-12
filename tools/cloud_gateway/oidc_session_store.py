@@ -66,7 +66,7 @@ class OIDCSessionStore:
                for v in (state, nonce, code_verifier, browser_binding)):
             raise OIDCSessionError("Invalid OIDC transaction values")
         current = int(time.time()) if now is None else int(now)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("DELETE FROM oidc_transactions WHERE expires_at <= ?", (current,))
             try:
                 db.execute(
@@ -82,7 +82,7 @@ class OIDCSessionStore:
         if not isinstance(state, str) or not state or not isinstance(browser_binding, str) or not browser_binding:
             raise OIDCSessionError("OIDC state and browser binding are required")
         current = int(time.time()) if now is None else int(now)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT * FROM oidc_transactions WHERE state_hash=?",
@@ -102,7 +102,7 @@ class OIDCSessionStore:
         current = int(time.time()) if now is None else int(now)
         session_id = secrets.token_urlsafe(32)
         csrf_secret = secrets.token_urlsafe(32)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.execute(
                 "INSERT INTO oidc_sessions VALUES(?,?,?,?,?,?,NULL)",
                 (self._digest(session_id), subject, role, csrf_secret, current, current + self.session_ttl),
@@ -114,7 +114,7 @@ class OIDCSessionStore:
         if not isinstance(session_id, str) or not session_id:
             return None
         current = int(time.time()) if now is None else int(now)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             row = db.execute(
                 "SELECT subject,role,csrf_secret,created_at,expires_at FROM oidc_sessions "
                 "WHERE session_hash=? AND revoked_at IS NULL AND expires_at>?",
@@ -160,7 +160,7 @@ class OIDCSessionStore:
         if not isinstance(session_id, str) or not session_id:
             return False
         current = int(time.time()) if now is None else int(now)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             result = db.execute(
                 "UPDATE oidc_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL",
                 (current, self._digest(session_id)),
