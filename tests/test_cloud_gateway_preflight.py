@@ -33,6 +33,14 @@ def valid_environment():
         "DCP_AZURE_PROJECTED_RUN_COST_USD": "1.25",
         "DCP_AZURE_LINUX_VM_SIZE": "Standard_D2s_v5",
         "DCP_AZURE_WINDOWS_VM_SIZE": "Standard_D4s_v5",
+        "DCP_AZURE_EXPECTED_FIREWALL_IP": "10.20.0.4",
+        "DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON": (
+            '[{"protocol":"Tcp","port":443,"destination":"198.51.100.0/24"}]'
+        ),
+        "DCP_AZURE_LINUX_ADMIN_USERNAME": "dcplinux",
+        "DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME": "dcp-linux-ssh-public",
+        "DCP_AZURE_WINDOWS_ADMIN_USERNAME": "dcpwindows",
+        "DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME": "dcp-windows-admin-password",
         "DCP_RUNNER_VERSION": "2.331.0",
         "DCP_RUNNER_LINUX_SHA256": "a" * 64,
         "DCP_RUNNER_WINDOWS_SHA256": "b" * 64,
@@ -64,7 +72,8 @@ class GatewayPreflightTests(unittest.TestCase):
         for name in (
             "gateway_api_token", "trusted_proxy", "owner_approval",
             "repository_allowlist", "github_app_configuration",
-            "azure_configuration_presence", "orka_configuration_presence",
+            "azure_configuration_presence", "azure_network_policy_configuration",
+            "azure_guest_profile_configuration", "orka_configuration_presence",
         ):
             self.assertEqual(checks[name]["status"], "PASS", name)
         self.assertEqual(checks["azure_network_policy"]["status"], "UNKNOWN")
@@ -73,6 +82,43 @@ class GatewayPreflightTests(unittest.TestCase):
         self.assertEqual(checks["orka_user_data_bootstrap"]["status"], "UNKNOWN")
         self.assertEqual(checks["live_provider_acceptance"]["status"], "SKIPPED")
         self.assertEqual(result["overall"], "UNKNOWN")
+
+    def test_missing_azure_egress_and_guest_profile_inputs_remain_unknown(self):
+        env = valid_environment()
+        for name in (
+            "DCP_AZURE_EXPECTED_FIREWALL_IP",
+            "DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON",
+            "DCP_AZURE_LINUX_ADMIN_USERNAME",
+            "DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME",
+            "DCP_AZURE_WINDOWS_ADMIN_USERNAME",
+            "DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME",
+        ):
+            env.pop(name)
+        checks = {item["check"]: item for item in inspect_environment(env)["checks"]}
+        self.assertEqual(checks["azure_network_policy_configuration"]["status"], "UNKNOWN")
+        self.assertEqual(checks["azure_guest_profile_configuration"]["status"], "UNKNOWN")
+
+    def test_invalid_azure_egress_policy_is_rejected_without_echoing_values(self):
+        env = valid_environment()
+        marker = "DO-NOT-ECHO-FIREWALL"
+        env["DCP_AZURE_EXPECTED_FIREWALL_IP"] = marker
+        env["DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON"] = (
+            '[{"protocol":"Tcp","port":0,"destination":"0.0.0.0/0"}]'
+        )
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_network_policy_configuration"]["status"], "FAIL")
+        self.assertNotIn(marker, str(result))
+        self.assertEqual(result["overall"], "FAIL")
+
+    def test_invalid_azure_guest_profile_references_are_rejected(self):
+        env = valid_environment()
+        env["DCP_AZURE_LINUX_ADMIN_USERNAME"] = "root"
+        env["DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME"] = "password_secret"
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_guest_profile_configuration"]["status"], "FAIL")
+        self.assertEqual(result["overall"], "FAIL")
 
     def test_empty_url_userinfo_fails_origin_validation(self):
         for variable in (
