@@ -103,10 +103,13 @@ class FlutterBuildExecutor:
             return [resolved, *command[1:]]
 
         executable_path = PureWindowsPath(resolved)
-        if not executable_path.is_absolute() or not executable_path.drive.startswith(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")):
+        if (
+            not executable_path.is_absolute()
+            or len(executable_path.drive) != 2
+            or executable_path.drive[1] != ":"
+            or not executable_path.drive[0].isalpha()
+        ):
             raise ExecutionError("Flutter executable must resolve to an absolute local Windows path")
-        if executable_path.drive.startswith("\\\\"):
-            raise ExecutionError("Flutter executable cannot be loaded from a network share")
         if executable_path.suffix.lower() not in (".bat", ".cmd"):
             return [resolved, *command[1:]]
 
@@ -121,7 +124,9 @@ class FlutterBuildExecutor:
         processor_path = PureWindowsPath(command_processor)
         if (
             not processor_path.is_absolute()
-            or processor_path.drive.startswith("\\\\")
+            or len(processor_path.drive) != 2
+            or processor_path.drive[1] != ":"
+            or not processor_path.drive[0].isalpha()
             or processor_path.name.lower() != "cmd.exe"
         ):
             raise ExecutionError("Windows command processor must be the trusted cmd.exe")
