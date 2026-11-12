@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import sys
 from pathlib import Path
 
@@ -60,7 +61,13 @@ def main(argv=None) -> int:
             raise ValueError("DCP_RUNNER_WORKSPACE_ROOT must be an absolute path")
         raw_repositories = json.loads(os.environ.get("DCP_RUNNER_TRUSTED_REPOSITORIES", "[]"))
         if (not isinstance(raw_repositories, list) or not raw_repositories
-                or any(not isinstance(item, str) for item in raw_repositories)):
+                or any(
+                    not isinstance(item, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", item)
+                    or any(part in (".", "..") for part in item.split("/"))
+                    for item in raw_repositories
+                )
+                or len(raw_repositories) != len(set(raw_repositories))):
             raise ValueError("DCP_RUNNER_TRUSTED_REPOSITORIES must be a non-empty JSON string array")
         manager = WorkspaceManager(
             root,

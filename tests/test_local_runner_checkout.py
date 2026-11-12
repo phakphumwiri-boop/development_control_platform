@@ -86,6 +86,13 @@ class GitHubCommitCheckoutTests(unittest.TestCase):
         with self.assertRaises(CheckoutError):
             checkout.checkout(next_job, self.worker, "owner/repo", self.sha)
 
+    def test_rejects_dot_segment_repository_names(self):
+        checkout = GitHubCommitCheckout(self.manager)
+        for repository in ("../repo", "owner/..", "./repo", "owner/."):
+            with self.subTest(repository=repository):
+                with self.assertRaises(CheckoutError):
+                    checkout.checkout(self.job_id, self.worker, repository, self.sha)
+
     def test_rejects_non_github_repository_and_invalid_sha(self):
         checkout = GitHubCommitCheckout(self.manager)
         with self.assertRaises(CheckoutError):

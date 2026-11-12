@@ -851,7 +851,7 @@ function runnerEsc(value){return String(value==null?"":value).replace(/[&<>"']/g
 async function runnerLoadRepositories(){
  const select=$("runner-repository"),status=$("runner-repositories-status");
  if(!runnerUI.session){select.disabled=true;status.textContent="Repository catalog: authentication required";return}
- status.textContent="Loading GitHub App installation repositories…";
+ status.textContent="Loading approved repository catalog…";
  try{
   const data=await runnerJson("./api/github/repositories");
   const rows=Array.isArray(data.repositories)?data.repositories:null;
@@ -861,7 +861,7 @@ async function runnerLoadRepositories(){
   select.innerHTML='<option value="">Choose an installed repository…</option>'+rows.map(r=>'<option value="'+runnerEsc(r.full_name)+'">'+runnerEsc(r.full_name)+(r.private?" · private":" · public")+'</option>').join("");
   select.disabled=!rows.length;
   if(rows.some(r=>r.full_name===previous))select.value=previous;
-  status.textContent="Installation catalog: "+rows.length+" repositories · membership verified by backend";
+  status.textContent="Approved catalog: "+rows.length+" repositories · access verified by backend";
  }catch(error){
   runnerUI.repositories=[];runnerUI.project=null;runnerUI.projectRequestId++;select.innerHTML='<option value="">Repository catalog unavailable</option>';select.disabled=true;
   status.textContent="Repository catalog: UNKNOWN — "+error.message;
@@ -879,7 +879,7 @@ async function runnerLoadRepositoryRefs(){
  runnerText("runner-commit-status","Commit: UNKNOWN");
  runnerText("runner-project-status","Project: UNKNOWN — select a verified commit");
  if(!repository||!runnerUI.repositories.some(r=>r.full_name===repository)){
-  select.innerHTML='<option value="">Select an installed repository first</option>';
+  select.innerHTML='<option value="">Select an approved repository first</option>';
   status.textContent="Refs: repository not selected";
   return;
  }
@@ -984,7 +984,7 @@ async function buildJobCreate(){
  const sha=$("runner-commit-sha").value.trim();
  const target=$("build-job-target").value;
  if(!runnerUI.session||!runnerUI.csrf){runnerText("build-job-result","BLOCKED: sign in and refresh the session first.");return}
- if(!runnerUI.repositories.some(item=>item.full_name===repository)){runnerText("build-job-result","BLOCKED: choose a GitHub App installation repository above.");return}
+ if(!runnerUI.repositories.some(item=>item.full_name===repository)){runnerText("build-job-result","BLOCKED: choose an approved repository above.");return}
  if(!/^[a-f0-9]{40}$/.test(sha)||runnerUI.verifiedCommit!==sha){runnerText("build-job-result","BLOCKED: verify the immutable commit SHA above first.");return}
  if(!runnerUI.project||!runnerUI.project.flutter||runnerUI.project.flutter.detected!==true){runnerText("build-job-result","BLOCKED: selected commit is not confirmed as a Flutter project.");return}
  const button=$("build-job-create");button.disabled=true;

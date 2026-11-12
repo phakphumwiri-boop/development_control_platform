@@ -418,7 +418,9 @@ class LocalRunnerCredentialFileTests(unittest.TestCase):
             path = Path(temp) / "runner-tokens.json"
             credentials = {"windows-local-01": "r" * 48}
             path.write_text(json.dumps(credentials), encoding="utf-8")
-            with patch.object(auth, "RUNNER_TOKENS_FILE", path):
+            with patch.object(auth, "RUNNER_TOKENS_FILE", path), patch.object(
+                auth, "GATEWAY_LOCAL_SETTINGS_FILE", Path(temp) / "missing-settings.json"
+            ):
                 env = auth.gateway_child_environment({
                     "PATH": "safe-path",
                     "DCP_RUNNER_TOKENS": "inherited-value-must-be-overridden",
@@ -429,9 +431,49 @@ class LocalRunnerCredentialFileTests(unittest.TestCase):
             )
             self.assertEqual(env["PATH"], "safe-path")
 
+    def test_loads_local_gateway_repository_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "gateway-local-settings.json"
+            allowed = ["owner/mobile-app", "org/another-app"]
+            path.write_text(json.dumps({"allowed_repositories": allowed}), encoding="utf-8")
+            self.assertEqual(
+                auth.load_gateway_local_settings(path),
+                {"allowed_repositories": allowed},
+            )
+
+    def test_gateway_environment_applies_local_repository_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "gateway-local-settings.json"
+            path.write_text(
+                json.dumps({"allowed_repositories": ["owner/mobile-app"]}),
+                encoding="utf-8",
+            )
+            with patch.object(auth, "GATEWAY_LOCAL_SETTINGS_FILE", path):
+                env = auth.gateway_child_environment({"PATH": "safe-path"})
+            self.assertEqual(
+                env["DCP_GATEWAY_ALLOWED_REPOSITORIES"],
+                "owner/mobile-app",
+            )
+
+    def test_rejects_invalid_local_gateway_repository_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "gateway-local-settings.json"
+            for settings in (
+                {"allowed_repositories": "owner/repo"},
+                {"allowed_repositories": ["owner/repo", "OWNER/REPO"]},
+                {"allowed_repositories": ["../repo"]},
+                {"allowed_repositories": ["owner/repo"] , "unexpected": True},
+            ):
+                with self.subTest(settings=settings):
+                    path.write_text(json.dumps(settings), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        auth.load_gateway_local_settings(path)
+
     def test_gateway_environment_keeps_explicit_environment_when_no_file_exists(self):
         with tempfile.TemporaryDirectory() as temp:
-            with patch.object(auth, "RUNNER_TOKENS_FILE", Path(temp) / "missing.json"):
+            with patch.object(auth, "RUNNER_TOKENS_FILE", Path(temp) / "missing.json"), patch.object(
+                auth, "GATEWAY_LOCAL_SETTINGS_FILE", Path(temp) / "missing-settings.json"
+            ):
                 env = auth.gateway_child_environment({"DCP_RUNNER_TOKENS": '{"worker":"' + "x" * 40 + '"}'})
             self.assertIn("DCP_RUNNER_TOKENS", env)
 

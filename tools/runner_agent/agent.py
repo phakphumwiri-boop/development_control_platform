@@ -271,9 +271,9 @@ class RunnerAgent:
             raise ValueError("unsupported target")
         repository = job["repository"]
         commit = job["commit_sha"]
-        if not isinstance(repository, str) or not re.fullmatch(
+        if (not isinstance(repository, str) or not re.fullmatch(
             r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository
-        ):
+        ) or any(part in (".", "..") for part in repository.split("/"))):
             raise ValueError("invalid GitHub repository")
         if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise ValueError("invalid immutable commit SHA")
@@ -471,6 +471,7 @@ def main(argv=None):
         or any(
             not isinstance(item, str)
             or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", item)
+            or any(part in (".", "..") for part in item.split("/"))
             for item in raw_repositories
         )
         or len(raw_repositories) != len(set(raw_repositories))

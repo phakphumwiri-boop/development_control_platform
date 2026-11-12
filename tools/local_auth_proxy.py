@@ -34,7 +34,9 @@ CREDENTIALS = Path(os.getenv("DCP_LOCAL_AUTH_CREDENTIAL_FILE", str(Path(os.geten
 
 
 RUNNER_TOKENS_FILE = CREDENTIALS.parent / "runner-tokens.json"
+GATEWAY_LOCAL_SETTINGS_FILE = CREDENTIALS.parent / "gateway-local-settings.json"
 MAX_RUNNER_TOKEN_FILE_BYTES = 64 * 1024
+MAX_GATEWAY_LOCAL_SETTINGS_BYTES = 16 * 1024
 
 
 def _unique_runner_token_object(pairs):
@@ -80,12 +82,49 @@ def load_runner_tokens(path: Path | None = None) -> dict[str, str]:
     return value
 
 
+def load_gateway_local_settings(path: Path | None = None) -> dict:
+    """Load non-secret, operator-approved local Gateway settings."""
+    target = Path(path) if path is not None else GATEWAY_LOCAL_SETTINGS_FILE
+    if target.is_symlink():
+        raise SystemExit("Local Gateway settings file must not be a symlink")
+    if not target.exists():
+        return {}
+    if not target.is_file() or target.stat().st_size > MAX_GATEWAY_LOCAL_SETTINGS_BYTES:
+        raise SystemExit("Local Gateway settings file is not a bounded regular file")
+    try:
+        value = json.loads(
+            target.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_runner_token_object,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise SystemExit("Local Gateway settings file is unreadable or invalid JSON") from None
+    if not isinstance(value, dict) or set(value) != {"allowed_repositories"}:
+        raise SystemExit("Local Gateway settings file has an invalid schema")
+    repositories = value.get("allowed_repositories")
+    if not isinstance(repositories, list) or len(repositories) > 20:
+        raise SystemExit("Local Gateway repository allowlist must contain at most 20 entries")
+    seen = set()
+    for repository in repositories:
+        if (
+            not isinstance(repository, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository)
+            or any(part in (".", "..") for part in repository.split("/"))
+            or repository.lower() in seen
+        ):
+            raise SystemExit("Local Gateway repository allowlist contains an invalid or duplicate entry")
+        seen.add(repository.lower())
+    return {"allowed_repositories": repositories}
+
+
 def gateway_child_environment(base_environment=None) -> dict[str, str]:
     """Prepare the Gateway environment, overriding any inherited Runner map with the protected file."""
     env = dict(os.environ if base_environment is None else base_environment)
     runner_tokens = load_runner_tokens()
     if runner_tokens:
         env["DCP_RUNNER_TOKENS"] = json.dumps(runner_tokens, separators=(",", ":"))
+    local_settings = load_gateway_local_settings()
+    if "allowed_repositories" in local_settings:
+        env["DCP_GATEWAY_ALLOWED_REPOSITORIES"] = ",".join(local_settings["allowed_repositories"])
     return env
 
 

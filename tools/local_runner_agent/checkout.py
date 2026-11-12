@@ -65,9 +65,9 @@ class GitHubCommitCheckout:
     @staticmethod
     def _validate(repository: str, commit_sha: str):
         import re
-        if not isinstance(repository, str) or not re.fullmatch(
+        if (not isinstance(repository, str) or not re.fullmatch(
             r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository
-        ):
+        ) or any(part in (".", "..") for part in repository.split("/"))):
             raise CheckoutError("invalid GitHub repository")
         if not isinstance(commit_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
             raise CheckoutError("invalid immutable commit SHA")
