@@ -158,9 +158,16 @@ class FlutterBuildExecutor:
                 if isinstance(value, str) and value and "\\x00" not in value:
                     env[name] = value
 
-            # Preflight also recognizes the standard per-user Android SDK location.
-            # Preserve that SDK explicitly because LOCALAPPDATA is isolated above.
-            if not env.get("ANDROID_SDK_ROOT") and not env.get("ANDROID_HOME"):
+            # Android tooling uses both names across Flutter/Gradle versions.
+            # If the host supplies either variable, expose the same SDK through
+            # both names while keeping the host SDK path outside isolated app data.
+            sdk_path = env.get("ANDROID_SDK_ROOT") or env.get("ANDROID_HOME")
+            if sdk_path:
+                env["ANDROID_SDK_ROOT"] = sdk_path
+                env["ANDROID_HOME"] = sdk_path
+            else:
+                # Preflight also recognizes the standard per-user Android SDK location.
+                # Preserve that SDK explicitly because LOCALAPPDATA is isolated above.
                 inherited_local = inherited.get("LOCALAPPDATA")
                 if isinstance(inherited_local, str) and inherited_local:
                     default_sdk = Path(inherited_local) / "Android" / "Sdk"
