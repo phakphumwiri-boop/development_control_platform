@@ -49,6 +49,9 @@ class FakeGitHubApp:
         self.retain_after_delete = retain_after_delete
         self.removals = []
 
+    def is_repository_accessible(self, repository, refresh=False):
+        return repository == REPOSITORY
+
     def find_runner(self, repository, runner_name):
         if self.runner and self.runner["name"] == runner_name:
             return dict(self.runner)
@@ -58,6 +61,7 @@ class FakeGitHubApp:
         self.removals.append((repository, runner_id))
         if not self.retain_after_delete:
             self.runner = None
+        return True
 
 
 class CleanupProvider:
@@ -98,12 +102,23 @@ class GitHubRunnerCleanupTests(unittest.TestCase):
         })
         cleanup = GitHubRunnerCleanup(app)
         result = cleanup(
-            {"repository": REPOSITORY, "provider_id": "dcp-123-abcdef12"},
+            {"repository": REPOSITORY, "provider_id": "azure:dcp-123-abcdef12"},
             RunnerInstance("dcp-123-abcdef12", "terminated"),
         )
         self.assertEqual(result, "removed")
         self.assertEqual(app.removals, [(REPOSITORY, 77)])
         self.assertIsNone(app.runner)
+
+    def test_uninstalled_repository_is_rejected_before_runner_lookup(self):
+        app = FakeGitHubApp({
+            "id": 77, "name": "dcp-123-abcdef12", "status": "offline", "labels": ()
+        })
+        with self.assertRaisesRegex(Exception, "not accessible"):
+            GitHubRunnerCleanup(app)(
+                {"repository": "attacker/repo", "provider_id": "azure:dcp-123-abcdef12"},
+                RunnerInstance("dcp-123-abcdef12", "terminated"),
+            )
+        self.assertEqual(app.removals, [])
 
     def test_online_runner_is_not_deregistered(self):
         app = FakeGitHubApp({
