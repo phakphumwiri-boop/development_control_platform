@@ -7,7 +7,7 @@ IMAGES={"linux":{"publisher":"Canonical","offer":"ubuntu-24_04-lts","sku":"serve
 class FakeArm:
  subscription_id=SUB; resource_group="dcp"
  def __init__(self):
-  self.calls=[]; self.nic_exists=True; self.fail_vm_put=False
+  self.calls=[]; self.nic_exists=True; self.nic_delete_pending=False; self.fail_vm_put=False
   self.get_result={"properties":{"provisioningState":"Succeeded"},"tags":{"repository":"phakphum12345/generated-A4-pdf","target-os":"linux"}}
  def resource_url(self,provider,kind,name,version): return f"https://management.azure.com/subscriptions/{SUB}/resourceGroups/dcp/providers/{provider}/{kind}/{name}?api-version={version}"
  def resource_id(self,provider,kind,name): return f"/subscriptions/{SUB}/resourceGroups/dcp/providers/{provider}/{kind}/{name}"
@@ -17,7 +17,8 @@ class FakeArm:
   if "Microsoft.Network/networkInterfaces/" in url:
    if method=="GET": return {"properties":{"provisioningState":"Succeeded"}} if self.nic_exists else None
    if method=="DELETE":
-    self.nic_exists=False
+    if not self.nic_delete_pending:
+     self.nic_exists=False
     return {}
   return self.get_result if method=="GET" else {}
 class FakeNetworkPolicy:
@@ -72,8 +73,10 @@ class AzureVMTests(unittest.TestCase):
  def test_termination_waits_for_missing_vm_and_nic_before_terminal_state(self):
   p,arm=self.make(); vm=p.provision(payload("linux")); p.terminate(vm.provider_id)
   arm.get_result=None
+  arm.nic_delete_pending=True
   self.assertEqual(p.status(vm.provider_id).state,"terminating")
   self.assertTrue(any(call[0]=="DELETE" and "networkInterfaces/" in call[1] for call in arm.calls))
+  arm.nic_delete_pending=False
   arm.nic_exists=False
   self.assertEqual(p.status(vm.provider_id).state,"terminated")
  def test_missing_nic_is_already_clean(self):
