@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from tools.cloud_gateway import azure_runtime
+from tools.cloud_gateway.azure_identity import IdentityError, ManagedIdentityCredential
 
 
 SUBSCRIPTION = "00000000-0000-0000-0000-000000000000"
@@ -97,6 +98,14 @@ class AzureRuntimeTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "bounded IPv4 CIDR"):
             azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
+
+    def test_managed_identity_credential_rejects_endpoint_userinfo_before_network(self):
+        credential = ManagedIdentityCredential(env={
+            "IDENTITY_ENDPOINT": "http://user:pass@localhost:1234/identity",
+            "IDENTITY_HEADER": "platform-header",
+        })
+        with self.assertRaisesRegex(IdentityError, "Untrusted managed identity"):
+            credential.get_token("https://management.azure.com/")
 
     def test_opt_in_rejects_identity_endpoint_userinfo(self):
         env = valid_environment()
