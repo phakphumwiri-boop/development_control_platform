@@ -11,6 +11,7 @@ SUBSCRIPTION = "00000000-0000-0000-0000-000000000000"
 def valid_environment():
     return {
         "DCP_AZURE_PROVIDER_ENABLED": "true",
+        "DCP_AZURE_USE_IMDS": "true",
         "DCP_AZURE_SUBSCRIPTION_ID": SUBSCRIPTION,
         "DCP_AZURE_RESOURCE_GROUP": "dcp-runners",
         "DCP_AZURE_LOCATION": "eastus",
@@ -22,6 +23,8 @@ def valid_environment():
             f"/subscriptions/{SUBSCRIPTION}/resourceGroups/network/providers/"
             "Microsoft.Network/networkSecurityGroups/dcp-runners"
         ),
+        "DCP_AZURE_BUDGET_NAME": "dcp-monthly",
+        "DCP_AZURE_PROJECTED_RUN_COST_USD": "1.25",
         "DCP_AZURE_LINUX_VM_SIZE": "Standard_D2s_v5",
         "DCP_AZURE_WINDOWS_VM_SIZE": "Standard_D4s_v5",
         "DCP_AZURE_LINUX_IMAGE_PUBLISHER": "Canonical",
@@ -75,6 +78,18 @@ class AzureRuntimeTests(unittest.TestCase):
             azure_runtime.build_azure_provider_from_env(env, None, lambda *args: True)
         with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "GitHub App"):
             azure_runtime.build_azure_provider_from_env(env, object(), None)
+
+    def test_opt_in_requires_a_trusted_managed_identity_mode(self):
+        env = valid_environment()
+        env.pop("DCP_AZURE_USE_IMDS")
+        with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "managed identity"):
+            azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
+
+    def test_opt_in_rejects_invalid_budget_projection(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROJECTED_RUN_COST_USD"] = "inf"
+        with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "finite and positive"):
+            azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
 
     def test_incomplete_configuration_fails_before_constructing_dependencies(self):
         env = valid_environment()
