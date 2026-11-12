@@ -128,12 +128,17 @@ class AzureRuntimeTests(unittest.TestCase):
             self.assertEqual(linux["computerName"], "dcp-123-abcd1234")
             self.assertTrue(linux["linuxConfiguration"]["disablePasswordAuthentication"])
             self.assertEqual(
+                linux["linuxConfiguration"]["ssh"]["publicKeys"][0]["keyData"],
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestOnly",
+            )
+            self.assertEqual(
                 linux["linuxConfiguration"]["ssh"]["publicKeys"][0]["path"],
                 "/home/dcplinux/.ssh/authorized_keys",
             )
             self.assertEqual(windows["computerName"], "DCPWABCD1234")
             self.assertLessEqual(len(windows["computerName"]), 15)
             self.assertEqual(windows["adminUsername"], "dcpwindows")
+            self.assertEqual(windows["adminPassword"], "Windows-Test-Only-Password-123!")
             self.assertEqual(secret_reader.get_secret.call_count, 2)
             provider_type.assert_called_once_with(
                 arm=arm,
