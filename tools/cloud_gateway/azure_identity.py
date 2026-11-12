@@ -12,8 +12,14 @@ class ManagedIdentityCredential:
  def get_token(self,resource):
   endpoint=self.env.get("IDENTITY_ENDPOINT")
   if endpoint:
-   parsed=urlparse(endpoint)
-   if parsed.scheme!="http" or parsed.hostname not in ("localhost","127.0.0.1","::1") or not self.env.get("IDENTITY_HEADER"):
+   try:
+    parsed=urlparse(endpoint)
+    _=parsed.port
+   except ValueError as exc:
+    raise IdentityError("Untrusted managed identity endpoint configuration") from exc
+   if (parsed.scheme!="http" or parsed.hostname not in ("localhost","127.0.0.1","::1")
+       or parsed.username is not None or parsed.password is not None or parsed.fragment
+       or not self.env.get("IDENTITY_HEADER")):
     raise IdentityError("Untrusted managed identity endpoint configuration")
    params={"api-version":"2019-08-01","resource":resource}
    if self.env.get("AZURE_CLIENT_ID"): params["client_id"]=self.env["AZURE_CLIENT_ID"]

@@ -198,6 +198,10 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
         "DCP_AZURE_LOCATION", "DCP_AZURE_SUBNET_ID", "DCP_AZURE_NSG_ID",
         "DCP_AZURE_BUDGET_NAME", "DCP_AZURE_PROJECTED_RUN_COST_USD",
         "DCP_AZURE_LINUX_VM_SIZE", "DCP_AZURE_WINDOWS_VM_SIZE",
+        "DCP_AZURE_LINUX_IMAGE_PUBLISHER", "DCP_AZURE_LINUX_IMAGE_OFFER",
+        "DCP_AZURE_LINUX_IMAGE_SKU", "DCP_AZURE_LINUX_IMAGE_VERSION",
+        "DCP_AZURE_WINDOWS_IMAGE_PUBLISHER", "DCP_AZURE_WINDOWS_IMAGE_OFFER",
+        "DCP_AZURE_WINDOWS_IMAGE_SKU", "DCP_AZURE_WINDOWS_IMAGE_VERSION",
         "DCP_RUNNER_VERSION", "DCP_RUNNER_LINUX_SHA256", "DCP_RUNNER_WINDOWS_SHA256",
     )
     azure_present = all(_present(values, name) for name in azure_names)
@@ -213,6 +217,16 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
         and _valid_amount(values.get("DCP_AZURE_PROJECTED_RUN_COST_USD", ""))
         and all(re.fullmatch(r"[A-Za-z0-9_]+", values.get(name, "")) for name in
                 ("DCP_AZURE_LINUX_VM_SIZE", "DCP_AZURE_WINDOWS_VM_SIZE"))
+        and all(
+            re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", values.get(name, ""))
+            and values.get(name, "").lower() != "latest"
+            for name in (
+                "DCP_AZURE_LINUX_IMAGE_PUBLISHER", "DCP_AZURE_LINUX_IMAGE_OFFER",
+                "DCP_AZURE_LINUX_IMAGE_SKU", "DCP_AZURE_LINUX_IMAGE_VERSION",
+                "DCP_AZURE_WINDOWS_IMAGE_PUBLISHER", "DCP_AZURE_WINDOWS_IMAGE_OFFER",
+                "DCP_AZURE_WINDOWS_IMAGE_SKU", "DCP_AZURE_WINDOWS_IMAGE_VERSION",
+            )
+        )
         and bool(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", values.get("DCP_RUNNER_VERSION", "")))
         and all(re.fullmatch(r"[a-fA-F0-9]{64}", values.get(name, "")) for name in
                 ("DCP_RUNNER_LINUX_SHA256", "DCP_RUNNER_WINDOWS_SHA256"))
@@ -256,6 +270,60 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
     )
     add("azure_guest_profile", "UNKNOWN",
         "Guest login profile and protected bootstrap require deployment-specific verification")
+
+    provider_flag = values.get("DCP_AZURE_PROVIDER_ENABLED", "false")
+    provider_flag_valid = isinstance(provider_flag, str) and provider_flag.lower() in ("true", "false")
+    provider_enabled = provider_flag_valid and provider_flag.lower() == "true"
+    identity_endpoint = values.get("IDENTITY_ENDPOINT", "")
+    identity_header = values.get("IDENTITY_HEADER", "")
+    use_imds = values.get("DCP_AZURE_USE_IMDS", "false")
+    identity_mode_valid = isinstance(use_imds, str) and use_imds.lower() in ("true", "false")
+    if identity_endpoint or identity_header:
+        if not isinstance(identity_endpoint, str) or not isinstance(identity_header, str) or not identity_header:
+            identity_endpoint_valid = False
+        else:
+            try:
+                identity_url = urlparse(identity_endpoint)
+                _ = identity_url.port
+                identity_endpoint_valid = (
+                    identity_url.scheme == "http"
+                    and identity_url.hostname in ("localhost", "127.0.0.1", "::1")
+                    and identity_url.username is None and identity_url.password is None
+                    and not identity_url.fragment
+                )
+            except ValueError:
+                identity_endpoint_valid = False
+    else:
+        identity_endpoint_valid = False
+    managed_identity_valid = identity_mode_valid and (
+        identity_endpoint_valid or use_imds.lower() == "true"
+    )
+    add(
+        "azure_managed_identity_configuration",
+        "PASS" if (not provider_enabled and provider_flag_valid) or managed_identity_valid else "FAIL",
+        "Azure provider is disabled; managed identity is not required"
+        if not provider_enabled and provider_flag_valid else (
+            "Trusted managed identity endpoint or explicit IMDS mode is configured"
+            if managed_identity_valid else
+            "Azure provider opt-in requires a trusted local identity endpoint with header or DCP_AZURE_USE_IMDS=true"
+        ),
+    )
+    provider_ready_config = (
+        provider_flag_valid and (
+            not provider_enabled
+            or (azure_valid and github_valid and network_valid and guest_valid and managed_identity_valid)
+        )
+    )
+    add(
+        "azure_provider_runtime",
+        "PASS" if provider_ready_config else "FAIL",
+        "Azure runtime adapter is explicitly disabled"
+        if provider_ready_config and not provider_enabled else (
+            "Azure runtime adapter configuration is complete; live Azure and per-NIC egress checks remain separate"
+            if provider_ready_config else
+            "Provider opt-in requires valid Azure IDs, pinned images, GitHub App, egress allowlist, and guest profile references"
+        ),
+    )
 
     orka_names = ("DCP_ORKA_URL", "DCP_ORKA_NAMESPACE", "DCP_ORKA_VM_CONFIG", "DCP_ORKA_API_TOKEN_SECRET_NAME")
     orka_present = all(_present(values, name) for name in orka_names)

@@ -33,6 +33,16 @@ def valid_environment():
         "DCP_AZURE_PROJECTED_RUN_COST_USD": "1.25",
         "DCP_AZURE_LINUX_VM_SIZE": "Standard_D2s_v5",
         "DCP_AZURE_WINDOWS_VM_SIZE": "Standard_D4s_v5",
+        "DCP_AZURE_LINUX_IMAGE_PUBLISHER": "Canonical",
+        "DCP_AZURE_LINUX_IMAGE_OFFER": "ubuntu-24_04-lts",
+        "DCP_AZURE_LINUX_IMAGE_SKU": "server",
+        "DCP_AZURE_LINUX_IMAGE_VERSION": "24.04.202501150",
+        "DCP_AZURE_WINDOWS_IMAGE_PUBLISHER": "MicrosoftWindowsServer",
+        "DCP_AZURE_WINDOWS_IMAGE_OFFER": "WindowsServer",
+        "DCP_AZURE_WINDOWS_IMAGE_SKU": "2025-datacenter-g2",
+        "DCP_AZURE_WINDOWS_IMAGE_VERSION": "20348.1.250101",
+        "DCP_AZURE_PROVIDER_ENABLED": "false",
+        "DCP_AZURE_USE_IMDS": "true",
         "DCP_AZURE_EXPECTED_FIREWALL_IP": "10.20.0.4",
         "DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON": (
             '[{"protocol":"Tcp","port":443,"destination":"198.51.100.0/24"}]'
@@ -73,7 +83,8 @@ class GatewayPreflightTests(unittest.TestCase):
             "gateway_api_token", "trusted_proxy", "owner_approval",
             "repository_allowlist", "github_app_configuration",
             "azure_configuration_presence", "azure_network_policy_configuration",
-            "azure_guest_profile_configuration", "orka_configuration_presence",
+            "azure_guest_profile_configuration", "azure_managed_identity_configuration",
+            "azure_provider_runtime", "orka_configuration_presence",
         ):
             self.assertEqual(checks[name]["status"], "PASS", name)
         self.assertEqual(checks["azure_network_policy"]["status"], "UNKNOWN")
@@ -82,6 +93,55 @@ class GatewayPreflightTests(unittest.TestCase):
         self.assertEqual(checks["orka_user_data_bootstrap"]["status"], "UNKNOWN")
         self.assertEqual(checks["live_provider_acceptance"]["status"], "SKIPPED")
         self.assertEqual(result["overall"], "UNKNOWN")
+
+    def test_azure_provider_opt_in_requires_all_runtime_configuration(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROVIDER_ENABLED"] = "true"
+        env.pop("DCP_AZURE_WINDOWS_IMAGE_VERSION")
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_configuration_presence"]["status"], "UNKNOWN")
+        self.assertEqual(checks["azure_provider_runtime"]["status"], "FAIL")
+        self.assertEqual(result["overall"], "FAIL")
+
+    def test_azure_provider_opt_in_passes_syntax_but_live_gates_stay_unknown(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROVIDER_ENABLED"] = "true"
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_provider_runtime"]["status"], "PASS")
+        self.assertEqual(checks["azure_network_policy"]["status"], "UNKNOWN")
+        self.assertEqual(checks["azure_guest_profile"]["status"], "UNKNOWN")
+        self.assertEqual(result["overall"], "UNKNOWN")
+
+    def test_azure_provider_opt_in_requires_managed_identity(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROVIDER_ENABLED"] = "true"
+        env.pop("DCP_AZURE_USE_IMDS")
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_managed_identity_configuration"]["status"], "FAIL")
+        self.assertEqual(checks["azure_provider_runtime"]["status"], "FAIL")
+        self.assertEqual(result["overall"], "FAIL")
+
+    def test_azure_provider_rejects_identity_endpoint_userinfo(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROVIDER_ENABLED"] = "true"
+        env.pop("DCP_AZURE_USE_IMDS")
+        env["IDENTITY_ENDPOINT"] = "http://user:pass@localhost:1234/identity"
+        env["IDENTITY_HEADER"] = "platform-header"
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_managed_identity_configuration"]["status"], "FAIL")
+        self.assertEqual(checks["azure_provider_runtime"]["status"], "FAIL")
+
+    def test_invalid_azure_provider_flag_fails_closed(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROVIDER_ENABLED"] = "yes"
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_provider_runtime"]["status"], "FAIL")
+        self.assertEqual(result["overall"], "FAIL")
 
     def test_missing_azure_egress_and_guest_profile_inputs_remain_unknown(self):
         env = valid_environment()

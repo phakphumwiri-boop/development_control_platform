@@ -5,6 +5,8 @@ from unittest.mock import patch
 from tools.cloud_gateway.policy import GatewaySettings
 from tools.cloud_gateway import github_app_runtime
 from tools.cloud_gateway.runner_cleanup import GitHubRunnerCleanup
+from tools.cloud_gateway.provider_router import ProviderRouter
+from tools.cloud_gateway.server import DisabledProvider, _provider_router_from_env
 from tools.runner_backend.provider import RunnerInstance
 
 
@@ -95,6 +97,33 @@ class RuntimeCompositionTests(unittest.TestCase):
                 RuntimeError, "No provider adapter configured"
             ):
                 operation()
+
+    def test_server_keeps_azure_and_orka_disabled_by_default(self):
+        router = _provider_router_from_env({}, None, None)
+        self.assertIsInstance(router, ProviderRouter)
+        self.assertIsInstance(router.providers["azure"], DisabledProvider)
+        self.assertIsInstance(router.providers["orka"], DisabledProvider)
+
+    def test_server_composes_only_explicitly_enabled_azure_adapter(self):
+        azure = object()
+        with patch("tools.cloud_gateway.server.build_azure_provider_from_env", return_value=azure) as factory:
+            router = _provider_router_from_env(
+                {"DCP_AZURE_PROVIDER_ENABLED": "true"},
+                object(),
+                lambda *args: True,
+            )
+        factory.assert_called_once()
+        self.assertIs(router.providers["azure"], azure)
+        self.assertIsInstance(router.providers["orka"], DisabledProvider)
+
+    def test_server_fails_startup_when_enabled_azure_configuration_is_invalid(self):
+        from tools.cloud_gateway.azure_runtime import AzureRuntimeConfigurationError
+        with patch(
+            "tools.cloud_gateway.server.build_azure_provider_from_env",
+            side_effect=AzureRuntimeConfigurationError("missing config"),
+        ):
+            with self.assertRaisesRegex(SystemExit, "missing config"):
+                _provider_router_from_env({"DCP_AZURE_PROVIDER_ENABLED": "true"}, object(), lambda *args: True)
 
     def test_gateway_settings_default_to_live_provisioning_disabled(self):
         settings = GatewaySettings()

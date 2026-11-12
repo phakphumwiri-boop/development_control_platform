@@ -78,19 +78,11 @@ class AzureVMProvider:
   os_name=payload.get("target_os"); expected={"linux":"ubuntu-24.04-x64","windows":"windows-2025-x64"}
   if os_name not in expected or payload.get("image")!=expected[os_name]: raise AzureProvisionError("Azure adapter accepts only approved Linux or Windows profiles")
   if payload.get("ephemeral") is not True or payload.get("network_policy")!="restricted-egress": raise AzureProvisionError("Runner must be ephemeral with restricted egress")
-  vm_name,nic_name=self._names(payload["workflow_run_id"]); bootstrap=self.bootstrap_factory(vm_name,os_name,payload)
-  if not isinstance(bootstrap,dict) or not isinstance(bootstrap.get("os_profile"),dict) or not isinstance(bootstrap.get("extension"),dict): raise AzureProvisionError("Protected bootstrap factory returned an invalid contract")
-  props=bootstrap["extension"].get("properties",{})
-  if not isinstance(props,dict) or not props.get("protectedSettings"): raise AzureProvisionError("Runner bootstrap must use protected extension settings")
-  if props.get("settings") not in (None,{}): raise AzureProvisionError("Public extension settings must be empty; bootstrap data belongs in protectedSettings")
+  vm_name,nic_name=self._names(payload["workflow_run_id"])
   tags={"managed-by":"dcp-cloud-runner","runner-id":vm_name,"repository":payload["repository"],"workflow-run-id":str(payload["workflow_run_id"]),"commit-sha":payload["commit_sha"],"target-os":os_name,"ephemeral":"true"}
   nic_url=self._url("Microsoft.Network","networkInterfaces",nic_name,API_NETWORK)
   nic_id=self.arm.resource_id("Microsoft.Network","networkInterfaces",nic_name)
   nic_body={"location":self.location,"tags":tags,"properties":{"networkSecurityGroup":{"id":self.nsg_id},"ipConfigurations":[{"name":"primary","properties":{"primary":True,"privateIPAllocationMethod":"Dynamic","subnet":{"id":self.subnet_id}}}]}}
-  vm_body={"location":self.location,"tags":tags,"hardwareProfile":{"vmSize":self.vm_sizes[os_name]},
-   "storageProfile":{"imageReference":self.image_references[os_name],"osDisk":{"name":vm_name+"-os","createOption":"FromImage","caching":"ReadOnly","managedDisk":{"storageAccountType":"Standard_LRS"},"diffDiskSettings":{"option":"Local"}}},
-   "osProfile":bootstrap["os_profile"],"networkProfile":{"networkInterfaces":[{"id":nic_id,"properties":{"primary":True}}]},
-   "securityProfile":{"uefiSettings":{"secureBootEnabled":True,"vTpmEnabled":True},"securityType":"TrustedLaunch"},"resources":[bootstrap["extension"]]}
   vm_url=self._url("Microsoft.Compute","virtualMachines",vm_name)
   vm_create_started=False
   try:
@@ -99,6 +91,20 @@ class AzureVMProvider:
     raise AzureProvisionError("ARM-backed effective NIC egress verifier is required")
    if self.network_policy.verify_nic(nic_id,self.nsg_id,self.subnet_id) is not True:
     raise AzureProvisionError("Effective Azure NIC egress policy was not verified")
+   # Do not mint a short-lived GitHub registration token until the NIC's
+   # effective NSG and default route have been proven to match the allowlist.
+   bootstrap=self.bootstrap_factory(vm_name,os_name,payload)
+   if not isinstance(bootstrap,dict) or not isinstance(bootstrap.get("os_profile"),dict) or not isinstance(bootstrap.get("extension"),dict):
+    raise AzureProvisionError("Protected bootstrap factory returned an invalid contract")
+   props=bootstrap["extension"].get("properties",{})
+   if not isinstance(props,dict) or not props.get("protectedSettings"):
+    raise AzureProvisionError("Runner bootstrap must use protected extension settings")
+   if props.get("settings") not in (None,{}):
+    raise AzureProvisionError("Public extension settings must be empty; bootstrap data belongs in protectedSettings")
+   vm_body={"location":self.location,"tags":tags,"hardwareProfile":{"vmSize":self.vm_sizes[os_name]},
+    "storageProfile":{"imageReference":self.image_references[os_name],"osDisk":{"name":vm_name+"-os","createOption":"FromImage","caching":"ReadOnly","managedDisk":{"storageAccountType":"Standard_LRS"},"diffDiskSettings":{"option":"Local"}}},
+    "osProfile":bootstrap["os_profile"],"networkProfile":{"networkInterfaces":[{"id":nic_id,"properties":{"primary":True}}]},
+    "securityProfile":{"uefiSettings":{"secureBootEnabled":True,"vTpmEnabled":True},"securityType":"TrustedLaunch"},"resources":[bootstrap["extension"]]}
    vm_create_started=True
    self.arm.request("PUT",vm_url,vm_body)
   except Exception as original:
