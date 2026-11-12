@@ -72,8 +72,8 @@ class FlutterArtifactPackager:
 
         if output.is_file():
             info = output.lstat()
-            if not stat.S_ISREG(info.st_mode) or info.st_size < 1 or info.st_size > self.max_bytes:
-                raise ArtifactPackageError("Flutter output file is outside allowed bounds")
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size < 1 or info.st_size > self.max_bytes:
+                raise ArtifactPackageError("Flutter output file is outside allowed bounds or hardlinked")
             shutil.copyfile(output, destination)
             destination.chmod(0o600)
         elif output.is_dir():
@@ -87,8 +87,8 @@ class FlutterArtifactPackager:
                 for filename in files:
                     item = Path(current) / filename
                     info = item.lstat()
-                    if not stat.S_ISREG(info.st_mode):
-                        raise ArtifactPackageError("Flutter output contains a non-regular file")
+                    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                        raise ArtifactPackageError("Flutter output contains a non-regular or hardlinked file")
                     relative = item.relative_to(output)
                     if relative.is_absolute() or ".." in relative.parts:
                         raise ArtifactPackageError("Flutter output path is unsafe")

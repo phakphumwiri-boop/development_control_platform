@@ -108,6 +108,17 @@ class WorkspaceManagerTests(unittest.TestCase):
         with self.assertRaises(WorkspaceError):
             self.manager.check_quota(self.job_a, "worker-a")
 
+    def test_rejects_hardlinked_files_from_outside_workspace(self):
+        workspace = self.manager.create(self.job_a, "worker-a")
+        outside = Path(self.temp.name) / "outside-secret.txt"
+        outside.write_text("not-for-artifacts", encoding="utf-8")
+        try:
+            os.link(outside, workspace / "linked-secret.txt")
+        except (OSError, NotImplementedError):
+            self.skipTest("hardlinks are unavailable on this platform")
+        with self.assertRaisesRegex(WorkspaceError, "hardlinked"):
+            self.manager.check_quota(self.job_a, "worker-a")
+
     def test_cleanup_removes_only_owned_workspace(self):
         a = self.manager.create(self.job_a, "worker-a")
         b = self.manager.create(self.job_b, "worker-b")

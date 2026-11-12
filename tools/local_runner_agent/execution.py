@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable
 
 from .workspace import WorkspaceError, WorkspaceManager
@@ -82,29 +82,63 @@ class FlutterBuildExecutor:
         return ("flutter", *_COMMANDS[target])
 
     @staticmethod
+    def _trusted_windows_command_processor(environ=None) -> str:
+        inherited = os.environ if environ is None else environ
+        system_root = inherited.get("SystemRoot", r"C:\Windows")
+        if not isinstance(system_root, str) or any(char in system_root for char in ('"', "%", "\r", "\n", "\x00")):
+            raise ExecutionError("Windows SystemRoot path is unsafe")
+        system_path = PureWindowsPath(system_root)
+        if (
+            not system_path.is_absolute()
+            or len(system_path.drive) != 2
+            or system_path.drive[1] != ":"
+            or not system_path.drive[0].isalpha()
+        ):
+            raise ExecutionError("Windows SystemRoot must be an absolute local path")
+        trusted = system_path / "System32" / "cmd.exe"
+        comspec = inherited.get("COMSPEC")
+        if comspec:
+            if not isinstance(comspec, str) or PureWindowsPath(comspec) != trusted:
+                raise ExecutionError("COMSPEC must resolve to SystemRoot\\System32\\cmd.exe")
+        return str(trusted)
+
+    @staticmethod
     def _process_command(command: tuple[str, ...], *, windows: bool | None = None,
                          executable: str | None = None) -> list[str] | str:
-        """Resolve Flutter's Windows .bat shim through cmd.exe without shell=True.
+        """Resolve Flutter to an absolute executable and safely invoke Windows batch shims.
 
-        Python cannot launch .bat/.cmd files directly with shell=False. For this
-        case a raw CreateProcess command line is required: cmd.exe's /c quoting
-        rules are not compatible with Python's argv-to-command-line escaping.
-        The invoked batch path and all arguments still come from the fixed target
-        allowlist and shutil.which; no caller-supplied command is accepted.
+        cmd.exe expands percent variables even inside quotes. The executable path
+        is therefore always quoted, percent/control characters are rejected, and
+        delayed expansion is disabled. Arguments come only from the fixed target
+        allowlist; shell=True is never used.
         """
         is_windows = os.name == "nt" if windows is None else windows
         resolved = executable or shutil.which(command[0])
-        if not is_windows or not resolved or Path(resolved).suffix.lower() not in (".bat", ".cmd"):
+        if not resolved:
             return list(command)
-        command_line = subprocess.list2cmdline([resolved, *command[1:]])
-        command_processor = os.environ.get("COMSPEC") or str(
-            Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe"
-        )
-        return (
-            subprocess.list2cmdline([command_processor])
-            + " /d /s /c "
-            + f'"{command_line}"'
-        )
+        if not isinstance(resolved, str) or any(char in resolved for char in ('"', "%", "\r", "\n", "\x00")):
+            raise ExecutionError("Flutter executable path contains unsafe command characters")
+        if not is_windows:
+            if not Path(resolved).is_absolute():
+                raise ExecutionError("Flutter executable must resolve to an absolute path")
+            return [resolved, *command[1:]]
+
+        executable_path = PureWindowsPath(resolved)
+        if (
+            not executable_path.is_absolute()
+            or len(executable_path.drive) != 2
+            or executable_path.drive[1] != ":"
+            or not executable_path.drive[0].isalpha()
+        ):
+            raise ExecutionError("Flutter executable must resolve to an absolute local Windows path")
+        if executable_path.suffix.lower() not in (".bat", ".cmd"):
+            return [resolved, *command[1:]]
+
+        command_processor = FlutterBuildExecutor._trusted_windows_command_processor()
+
+        arguments = subprocess.list2cmdline(list(command[1:]))
+        command_line = f'"{resolved}"' + (f" {arguments}" if arguments else "")
+        return f'"{command_processor}" /d /v:off /s /c "{command_line}"'
 
     @staticmethod
     def _execution_environment(workspace: Path, *, environ=None,
@@ -157,6 +191,7 @@ class FlutterBuildExecutor:
                 value = inherited.get(name)
                 if isinstance(value, str) and value and "\\x00" not in value:
                     env[name] = value
+            env["COMSPEC"] = FlutterBuildExecutor._trusted_windows_command_processor(inherited)
 
             # Android tooling uses both names across Flutter/Gradle versions.
             # If the host supplies either variable, expose the same SDK through
