@@ -13,7 +13,7 @@ FW="10.20.0.4"
 def nsg_body(access="Allow", include_rules=True):
     rules=[] if not include_rules else [{
         "name":"allow-runner-https","direction":"Outbound","access":access,
-        "protocol":"Tcp","destinationPortRange":"443","destinationAddressPrefix":"198.51.100.0/24",
+        "protocol":"Tcp","sourceAddressPrefix":"10.1.0.0/16","destinationPortRange":"443","destinationAddressPrefix":"198.51.100.0/24",
         "priority":100
     }]
     return {"value":[{
@@ -40,7 +40,7 @@ class FakeArm:
     def request(self,method,url,payload=None,allow_missing=False):
         self.calls.append((method,url,payload))
         if method=="GET" and "networkInterfaces/" in url:
-            return {"properties":{"provisioningState":"Succeeded"}}
+            return {"properties":{"provisioningState":"Succeeded","ipConfigurations":[{"properties":{"primary":True,"privateIPAddress":"10.1.2.3"}}]}}
         return {}
 
     def request_with_metadata(self,method,url,payload=None):
@@ -75,6 +75,11 @@ class VerifierTests(unittest.TestCase):
         default_rule["value"][0]["effectiveSecurityRules"][0]["priority"]=65001
         with self.assertRaises(EffectiveNetworkPolicyError):
             self.make(FakeArm(nsg=default_rule)).verify_nic(NIC,NSG,SUBNET)
+    def test_outbound_allow_rule_must_match_actual_nic_source_ip(self):
+        body=nsg_body()
+        body["value"][0]["effectiveSecurityRules"][0]["sourceAddressPrefix"]="10.99.0.0/16"
+        with self.assertRaises(EffectiveNetworkPolicyError):
+            self.make(FakeArm(nsg=body)).verify_nic(NIC,NSG,SUBNET)
     def test_missing_nsg_or_route_data_fails_closed(self):
         for arm in (FakeArm(nsg={}),FakeArm(routes={})):
             with self.assertRaises(EffectiveNetworkPolicyError):
