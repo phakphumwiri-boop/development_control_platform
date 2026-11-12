@@ -7,6 +7,7 @@ import re
 from .azure_identity import ManagedIdentityCredential
 from .github_app import GitHubAppRunnerBootstrap, GitHubRunnerOnlineChecker
 from .key_vault import KeyVaultSecretReader
+from .runner_cleanup import GitHubRunnerCleanup
 
 
 def build_github_app_runtime(settings, env=None):
@@ -45,19 +46,6 @@ def build_github_app_runtime(settings, env=None):
     )
     checker = GitHubRunnerOnlineChecker(app)
 
-    def cleanup(row, instance):
-        repository = row.get("repository")
-        provider_id = row.get("provider_id")
-        if not app.is_repository_accessible(repository, refresh=True) or not isinstance(provider_id, str):
-            raise RuntimeError("Runner cleanup identity is not accessible to the DCP GitHub App installation")
-        runner_name = provider_id.split(":", 1)[-1]
-        runner = app.find_runner(repository, runner_name)
-        if runner is None:
-            return "already_absent"
-        if runner.get("status") != "offline":
-            raise RuntimeError("Refusing to remove a runner not confirmed offline")
-        if app.remove_runner(repository, runner["id"]) is not True:
-            raise RuntimeError("GitHub runner deregistration was not confirmed")
-        return "removed"
+    cleanup = GitHubRunnerCleanup(app)
 
     return app, checker, cleanup

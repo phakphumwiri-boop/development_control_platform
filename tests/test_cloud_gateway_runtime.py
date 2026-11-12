@@ -4,6 +4,8 @@ from unittest.mock import patch
 
 from tools.cloud_gateway.policy import GatewaySettings
 from tools.cloud_gateway import github_app_runtime
+from tools.cloud_gateway.runner_cleanup import GitHubRunnerCleanup
+from tools.runner_backend.provider import RunnerInstance
 
 
 class RuntimeCompositionTests(unittest.TestCase):
@@ -43,19 +45,25 @@ class RuntimeCompositionTests(unittest.TestCase):
         self.assertIs(checker.github_app, app)
         self.assertTrue(callable(cleanup))
 
-    def test_cleanup_requires_installed_offline_runner(self):
+    def test_cleanup_requires_installed_offline_runner_and_confirms_absence(self):
         with patch.object(github_app_runtime, "ManagedIdentityCredential"), \
              patch.object(github_app_runtime, "KeyVaultSecretReader") as reader, \
              patch.object(github_app_runtime, "GitHubAppRunnerBootstrap") as app_type:
             reader.return_value.get_secret.return_value = "key"
             app, _, cleanup = github_app_runtime.build_github_app_runtime(self.settings, self.env)
+        self.assertIsInstance(cleanup, GitHubRunnerCleanup)
         app.is_repository_accessible.side_effect = lambda repository, refresh=False: repository == "owner/repo"
-        app.find_runner.return_value = {"id": 42, "status": "offline"}
+        runner = {"id": 42, "status": "offline"}
+        app.find_runner.side_effect = [runner, None]
         app.remove_runner.return_value = True
         self.assertEqual(cleanup(
-            {"repository": "owner/repo", "provider_id": "azure:dcp-1-abcd1234"}, None
+            {"repository": "owner/repo", "provider_id": "azure:dcp-1-abcd1234"},
+            RunnerInstance("azure:dcp-1-abcd1234", "terminated"),
         ), "removed")
         app.remove_runner.assert_called_once_with("owner/repo", 42)
+        self.assertEqual(app.find_runner.call_count, 2)
+        self.assertEqual(app.find_runner.call_args_list[0].args, ("owner/repo", "dcp-1-abcd1234"))
+        self.assertEqual(app.find_runner.call_args_list[1].args, ("owner/repo", "dcp-1-abcd1234"))
 
     def test_cleanup_refuses_online_and_unallowlisted_runners(self):
         with patch.object(github_app_runtime, "ManagedIdentityCredential"), \
@@ -65,10 +73,11 @@ class RuntimeCompositionTests(unittest.TestCase):
             app, _, cleanup = github_app_runtime.build_github_app_runtime(self.settings, self.env)
         app.is_repository_accessible.side_effect = lambda repository, refresh=False: repository == "owner/repo"
         app.find_runner.return_value = {"id": 42, "status": "online"}
+        terminal = RunnerInstance("dcp-1-abcd1234", "terminated")
         with self.assertRaisesRegex(RuntimeError, "not confirmed offline"):
-            cleanup({"repository": "owner/repo", "provider_id": "orka:dcp-1-abcd1234"}, None)
+            cleanup({"repository": "owner/repo", "provider_id": "orka:dcp-1-abcd1234"}, terminal)
         with self.assertRaisesRegex(RuntimeError, "not accessible to the DCP GitHub App installation"):
-            cleanup({"repository": "attacker/repo", "provider_id": "dcp-1-abcd1234"}, None)
+            cleanup({"repository": "attacker/repo", "provider_id": "dcp-1-abcd1234"}, terminal)
         app.remove_runner.assert_not_called()
 
 

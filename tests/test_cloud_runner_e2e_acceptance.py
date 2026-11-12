@@ -61,6 +61,9 @@ class FakeGitHubApp:
         self.runner = None
         self.removals = []
 
+    def is_repository_accessible(self, repository, refresh=False):
+        return repository == REPOSITORY
+
     def find_runner(self, repository, runner_name):
         if self.runner and self.runner["name"] == runner_name:
             return dict(self.runner)
@@ -70,6 +73,7 @@ class FakeGitHubApp:
         self.removals.append((repository, runner_id))
         if self.runner and self.runner["id"] == runner_id:
             self.runner = None
+        return True
 
 
 class FakeProvider:
