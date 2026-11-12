@@ -1,6 +1,6 @@
-# Local Job Control Plane — milestones 1–2
+# Local Job Control Plane — current status and milestones
 
-The local-first job API adds a durable SQLite queue, authenticated HTTP lifecycle endpoints, and per-job workspace isolation. It does not execute repository code, launch build commands, create VMs, or enable cloud provisioning.
+The local-first Job Control Plane provides a durable SQLite queue, authenticated HTTP lifecycle endpoints, a Runner Fleet Registry, a one-job Flutter execution pipeline, and an authenticated Artifact Center. The Local Runner can execute only fixed Flutter targets after explicit opt-in and trusted-repository checks. Cloud VM provisioning remains disabled by default; Azure adapter composition is a separate opt-in and does not itself authorize provisioning.
 
 ## Dashboard API
 
@@ -30,7 +30,7 @@ The jobs database defaults to `DCP_GATEWAY_DATABASE + ".jobs"`; override with `D
 
 ## Safety boundary
 
-Expired leases are recovered before a claim. Old workers are fenced by the lease checks in the store. The API accepts no shell command, arbitrary environment, filesystem path, or provider selection. Workspace allocation is local to the Runner host and does not imply repository checkout or build execution. Artifact upload/storage, VM creation, and Cloud Provisioning remain disabled. Flutter build execution is opt-in and restricted to an explicit trusted-repository allowlist. It runs on the Runner host; it is not an OS sandbox, so only repositories approved by the operator may be executed, and production runners should be disposable/isolated hosts.
+Expired leases are recovered before a claim. Old workers are fenced by the lease checks in the store. The API accepts no shell command, arbitrary environment, filesystem path, or provider selection. Workspace allocation is local to the Runner host and does not provide OS-level isolation. Checkout, Flutter execution, and artifact upload are implemented in M6/M7; execution remains opt-in and restricted to an explicit trusted-repository allowlist. It runs with the Runner host account's permissions and is not an OS sandbox. Build scripts may access files and processes available to that account, so production runners must be dedicated disposable/isolated hosts with no unrelated credentials or workloads. Cloud VM provisioning remains disabled by default.
 
 
 ## M3 — Local Runner Agent bootstrap
@@ -61,7 +61,7 @@ The check reads only `/healthz`; it does not claim a job. The client uses Python
 
 - Every workspace is created beneath one configured absolute root, using the canonical Job UUID as its directory name.
 - Workspace directories are mode `0700`; the ownership marker is mode `0600` and binds the directory to the exact Job UUID and authenticated worker ID.
-- Duplicate allocation, cross-job/cross-worker access, symlink roots, symlink workspace entries, and path escapes fail closed.
+- Duplicate allocation, cross-job/cross-worker access, symlink roots, symlink workspace entries, hardlinked files, and path escapes fail closed.
 - Active workspace count is bounded (default 8); regular-file bytes are measured against a per-workspace quota (default 2 GiB).
 - Cleanup requires a valid ownership marker and removes only the matching Job workspace.
 - The workspace manager does not clone a repository, extract an archive, spawn a process, or execute a build.
@@ -89,13 +89,13 @@ The Runner Agent now has a one-job execution pipeline:
 
 - `GitHubCommitCheckout` downloads only `https://api.github.com/repos/{owner}/{repo}/zipball/{commit_sha}`; redirects are HTTPS-only and restricted to GitHub archive hosts.
 - Archive download and expanded size, entry count, paths, and file types are bounded. Path traversal, symlinks, special files, and non-Flutter commits are rejected. No Git hooks, submodules, or repository scripts run during checkout.
-- Before each target command, the Runner executes the fixed `flutter pub get --enforce-lockfile` step against the committed `pubspec.lock`; missing or symlink lockfiles are rejected. Flutter commands are fixed by target; arbitrary shell commands, command arguments, and environment variables are not accepted. The Runner performs a read-only host preflight before execution and rejects configured capabilities that were not detected locally.
+- Before each target command, the Runner executes the fixed `flutter pub get --enforce-lockfile` step against the committed `pubspec.lock`; missing or symlink lockfiles are rejected. Flutter commands are fixed by target; arbitrary shell commands, command arguments, and environment variables are not accepted. Windows `.bat/.cmd` launchers quote the absolute executable path, disable delayed expansion, and reject percent/control characters that could be interpreted by `cmd.exe`. The Runner performs a read-only host preflight before execution and rejects configured capabilities that were not detected locally.
 - Supported targets: `test`, `build` (Android APK), `package` (Android App Bundle), `build_android`, `build_web`, `build_windows`, `build_linux`, `build_macos`, and `build_ios`.
 - macOS/iOS targets require a macOS host; Windows and Linux targets require their corresponding host OS.
 - Dependency resolution and target execution share a bounded job deadline and combined output limit, process-tree termination, and periodic Runner lease heartbeat/cancellation checks. Pub, Gradle, temporary, and home caches are isolated beneath the per-job workspace; only required OS/toolchain variables (including the detected Android SDK location on Windows) are passed through.
 - Execution is disabled by default. `--check` remains health-only. `--once` processes at most one job and requires `DCP_RUNNER_EXECUTION_ENABLED=1`, an absolute `DCP_RUNNER_WORKSPACE_ROOT`, a non-empty JSON array in `DCP_RUNNER_TRUSTED_REPOSITORIES`, and a successful local Git/Flutter preflight. `DCP_RUNNER_CAPABILITIES`, when supplied, must be a unique subset of preflight-detected capabilities.
 - Set `DCP_GITHUB_TOKEN` only as a host environment secret when private-repository read access is required. It is not stored in a job, logged, or passed in a URL.
-- Build outputs are packaged by `FlutterArtifactPackager`, uploaded through the authenticated Runner endpoint, indexed with SHA-256 metadata, and downloadable through the authenticated Dashboard Artifact Center.
+- Build outputs are packaged by `FlutterArtifactPackager`, uploaded through the authenticated Runner endpoint, indexed with SHA-256 metadata, and downloadable through the authenticated Dashboard Artifact Center. Symlinks, special files, and hardlinked files are rejected so an artifact cannot directly package a host file linked into the output tree.
 
 Example PowerShell configuration (use a dedicated, disposable Runner host and an operator-approved repository):
 
