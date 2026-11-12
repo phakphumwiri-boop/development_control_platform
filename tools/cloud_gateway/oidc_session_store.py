@@ -22,6 +22,8 @@ class OIDCSessionStore:
             raise ValueError("OIDC session TTL must be 300..86400 seconds")
         if not isinstance(transaction_ttl, int) or not 60 <= transaction_ttl <= 900:
             raise ValueError("OIDC transaction TTL must be 60..900 seconds")
+        if not isinstance(database, str) or database == ":memory:":
+            raise ValueError("OIDC session store requires a durable SQLite file")
         self.database = database
         self.session_ttl = session_ttl
         self.transaction_ttl = transaction_ttl
@@ -126,14 +128,33 @@ class OIDCSessionStore:
 
     def rotate_session(self, old_session_id: str, now: int | None = None) -> tuple[str, dict]:
         current = int(time.time()) if now is None else int(now)
-        old = self.get_session(old_session_id, current)
-        if old is None:
+        if not isinstance(old_session_id, str) or not old_session_id:
             raise OIDCSessionError("Session is invalid or expired")
-        new_id, session = self.create_session(old["subject"], old["role"], current)
-        if not self.revoke_session(old_session_id, current):
-            self.revoke_session(new_id, current)
-            raise OIDCSessionError("Session rotation lost a concurrent revocation race")
-        return new_id, session
+        new_id = secrets.token_urlsafe(32)
+        csrf_secret = secrets.token_urlsafe(32)
+        new_expiry = current + self.session_ttl
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT subject,role FROM oidc_sessions WHERE session_hash=? "
+                "AND revoked_at IS NULL AND expires_at>?",
+                (self._digest(old_session_id), current),
+            ).fetchone()
+            if old is None:
+                db.rollback()
+                raise OIDCSessionError("Session is invalid or expired")
+            db.execute(
+                "UPDATE oidc_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL",
+                (current, self._digest(old_session_id)),
+            )
+            db.execute(
+                "INSERT INTO oidc_sessions VALUES(?,?,?,?,?,?,NULL)",
+                (self._digest(new_id), old["subject"], old["role"], csrf_secret,
+                 current, new_expiry),
+            )
+            db.commit()
+        return new_id, {"subject": old["subject"], "role": old["role"],
+                        "csrf_token": csrf_secret, "expires_at": new_expiry}
 
     def revoke_session(self, session_id: str, now: int | None = None) -> bool:
         if not isinstance(session_id, str) or not session_id:
