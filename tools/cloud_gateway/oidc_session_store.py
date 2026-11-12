@@ -5,6 +5,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
+from contextlib import closing
 import time
 from pathlib import Path
 
@@ -26,7 +27,7 @@ class OIDCSessionStore:
         self.transaction_ttl = transaction_ttl
         if database != ":memory:":
             prepare_private_sqlite_file(database)
-        with self._connect() as db:
+        with closing(self._connect()) as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS oidc_transactions (
                     state_hash TEXT PRIMARY KEY,
