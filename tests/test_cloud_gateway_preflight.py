@@ -124,6 +124,17 @@ class GatewayPreflightTests(unittest.TestCase):
         self.assertEqual(checks["azure_provider_runtime"]["status"], "FAIL")
         self.assertEqual(result["overall"], "FAIL")
 
+    def test_azure_provider_rejects_identity_endpoint_userinfo(self):
+        env = valid_environment()
+        env["DCP_AZURE_PROVIDER_ENABLED"] = "true"
+        env.pop("DCP_AZURE_USE_IMDS")
+        env["IDENTITY_ENDPOINT"] = "http://user:pass@localhost:1234/identity"
+        env["IDENTITY_HEADER"] = "platform-header"
+        result = inspect_environment(env)
+        checks = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(checks["azure_managed_identity_configuration"]["status"], "FAIL")
+        self.assertEqual(checks["azure_provider_runtime"]["status"], "FAIL")
+
     def test_invalid_azure_provider_flag_fails_closed(self):
         env = valid_environment()
         env["DCP_AZURE_PROVIDER_ENABLED"] = "yes"
