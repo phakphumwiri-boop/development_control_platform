@@ -274,10 +274,39 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
     provider_flag = values.get("DCP_AZURE_PROVIDER_ENABLED", "false")
     provider_flag_valid = isinstance(provider_flag, str) and provider_flag.lower() in ("true", "false")
     provider_enabled = provider_flag_valid and provider_flag.lower() == "true"
+    identity_endpoint = values.get("IDENTITY_ENDPOINT", "")
+    identity_header = values.get("IDENTITY_HEADER", "")
+    use_imds = values.get("DCP_AZURE_USE_IMDS", "false")
+    identity_mode_valid = isinstance(use_imds, str) and use_imds.lower() in ("true", "false")
+    if identity_endpoint or identity_header:
+        try:
+            identity_url = urlparse(identity_endpoint)
+            identity_endpoint_valid = (
+                isinstance(identity_endpoint, str) and isinstance(identity_header, str)
+                and bool(identity_header) and identity_url.scheme == "http"
+                and identity_url.hostname in ("localhost", "127.0.0.1", "::1")
+            )
+        except ValueError:
+            identity_endpoint_valid = False
+    else:
+        identity_endpoint_valid = False
+    managed_identity_valid = identity_mode_valid and (
+        identity_endpoint_valid or use_imds.lower() == "true"
+    )
+    add(
+        "azure_managed_identity_configuration",
+        "PASS" if (not provider_enabled and provider_flag_valid) or managed_identity_valid else "FAIL",
+        "Azure provider is disabled; managed identity is not required"
+        if not provider_enabled and provider_flag_valid else (
+            "Trusted managed identity endpoint or explicit IMDS mode is configured"
+            if managed_identity_valid else
+            "Azure provider opt-in requires a trusted local identity endpoint with header or DCP_AZURE_USE_IMDS=true"
+        ),
+    )
     provider_ready_config = (
         provider_flag_valid and (
             not provider_enabled
-            or (azure_valid and github_valid and network_valid and guest_valid)
+            or (azure_valid and github_valid and network_valid and guest_valid and managed_identity_valid)
         )
     )
     add(
