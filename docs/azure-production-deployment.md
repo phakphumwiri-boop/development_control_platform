@@ -12,9 +12,10 @@ The current Gateway has:
 - a SQLite lifecycle, audit, and replay-nonce store;
 - optional Azure Managed Identity access to Key Vault;
 - optional GitHub App private-key retrieval from Key Vault;
-- Azure VM and Orka provider modules with mock-backed tests.
+- Azure VM provider runtime factory with explicit `DCP_AZURE_PROVIDER_ENABLED` opt-in; the default remains disabled.
+- ARM-backed effective NIC NSG/route verification and provider-side GitHub runner lifecycle cleanup.
 
-The current production entry point still composes `ProviderRouter(DisabledProvider(), DisabledProvider())`. It does not compose the real Azure VM adapter. The current repo also does not include a complete deployed OIDC callback/session service or a trusted proxy that signs the DCP identity headers. Therefore the first Azure deployment must be a non-provisioning staging deployment. A green `/healthz` check is not evidence that login, runner creation, Azure VM bootstrap, or cleanup works.
+When `DCP_AZURE_PROVIDER_ENABLED` is false or absent, the production entry point composes `ProviderRouter(DisabledProvider(), DisabledProvider())`. When it is explicitly true and the complete Azure/GitHub App/Key Vault/image/egress/guest configuration is valid, the Gateway composes the Azure VM adapter while keeping Orka disabled. This adapter flag does not enable provisioning: `DCP_GATEWAY_PROVISIONING_ENABLED` and `DCP_GATEWAY_OWNER_APPROVED` remain independent hard gates and default to false. The current repo still does not include a complete deployed OIDC callback/session service or a trusted proxy that signs the DCP identity headers. Therefore the first Azure deployment must be a non-provisioning staging deployment. A green `/healthz` check is not evidence that login, runner creation, Azure VM bootstrap, or cleanup works.
 
 ## 2. Target Azure topology
 
@@ -69,6 +70,8 @@ Gateway configuration must be injected from the deployment secret integration, n
 - `DCP_GATEWAY_OWNER_APPROVED=false` until explicit owner sign-off.
 - `DCP_GATEWAY_ALLOWED_REPOSITORIES` restricted to the reviewed exact allowlist.
 - Budget, concurrency, runtime, and circuit-breaker values set to conservative reviewed limits.
+- `DCP_AZURE_PROVIDER_ENABLED=false` by default. Set to `true` only to compose the Azure adapter; it is not a provisioning approval.
+- Explicit pinned Marketplace image fields: `DCP_AZURE_LINUX_IMAGE_PUBLISHER`, `DCP_AZURE_LINUX_IMAGE_OFFER`, `DCP_AZURE_LINUX_IMAGE_SKU`, `DCP_AZURE_LINUX_IMAGE_VERSION`, and the corresponding `DCP_AZURE_WINDOWS_IMAGE_*` fields. `latest` is forbidden.
 
 The read-only preflight also validates these Azure-specific configuration references without reading secret values:
 - `DCP_AZURE_EXPECTED_FIREWALL_IP` — the approved private IPv4 address of the Azure Firewall/NVA next hop.
@@ -76,9 +79,9 @@ The read-only preflight also validates these Azure-specific configuration refere
 - `DCP_AZURE_LINUX_ADMIN_USERNAME` and `DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME` — the Linux administrator name and Key Vault secret name holding its SSH public key.
 - `DCP_AZURE_WINDOWS_ADMIN_USERNAME` and `DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME` — the Windows administrator name and Key Vault secret name holding its password.
 
-These names define a configuration contract for preflight only. A syntax PASS is not proof that Key Vault contains valid material, that Azure has applied the network policy, or that guest login works. The runtime provider remains disabled until a separate reviewed composition change and the live acceptance gates below are complete.
+The preflight checks configuration syntax only. The Azure runtime factory consumes these references only when `DCP_AZURE_PROVIDER_ENABLED=true`; guest SSH/password values are fetched from Key Vault lazily during a specific provision request and are never emitted by preflight. A syntax PASS is not proof that Key Vault contains valid material, that Azure has applied the network policy, or that guest login works.
 
-Do not set provisioning to true simply because the service starts. The current runtime is intentionally wired to `DisabledProvider`, and the Azure provider adapter still needs verified guest login, effective egress controls, lifecycle checks, and real acceptance tests.
+Do not set provisioning to true simply because the service starts. Adapter composition, provisioning enablement, and owner approval are three separate gates. The live acceptance steps below are still required before any production use.
 
 ## 5. Deployment sequence and release gates
 
