@@ -211,15 +211,24 @@ class AzureEffectiveNetworkPolicyVerifier:
                 defaults.append(route)
         if not defaults:
             raise EffectiveNetworkPolicyError("No effective IPv4 default route was returned")
+        active_defaults = []
         for route in defaults:
-            if route.get("state") not in ("Active", "active") or route.get("nextHopType") != "VirtualAppliance":
-                raise EffectiveNetworkPolicyError("Default route is inactive or bypasses the approved firewall")
+            state = route.get("state")
+            if state == "Invalid":
+                continue
+            if state not in ("Active", "active"):
+                raise EffectiveNetworkPolicyError("Default route state is unknown")
+            active_defaults.append(route)
+            if route.get("nextHopType") != "VirtualAppliance":
+                raise EffectiveNetworkPolicyError("Active default route bypasses the approved firewall")
             next_hop = route.get("nextHopIp")
             try:
                 if ipaddress.ip_address(next_hop) != ipaddress.ip_address(self.expected_firewall_ip):
                     raise EffectiveNetworkPolicyError("Default route next hop does not match the approved firewall")
             except ValueError as exc:
                 raise EffectiveNetworkPolicyError("Default route next hop is missing or invalid") from exc
+        if not active_defaults:
+            raise EffectiveNetworkPolicyError("No active effective IPv4 default route was returned")
 
     def _wait_for_nic(self, nic_name):
         url = self.arm.resource_url(
