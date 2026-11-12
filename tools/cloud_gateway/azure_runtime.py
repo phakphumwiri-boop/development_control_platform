@@ -6,6 +6,7 @@ The adapter is disabled unless DCP_AZURE_PROVIDER_ENABLED=true.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import re
@@ -62,6 +63,43 @@ def _required_values(env: Mapping[str, str]) -> dict[str, str]:
             "Azure provider configuration is incomplete: " + ", ".join(missing)
         )
     return {name: env[name].strip() for name in _REQUIRED}
+
+
+def _validate_egress_configuration(config: Mapping[str, str], flows) -> None:
+    try:
+        firewall = ipaddress.ip_address(config["DCP_AZURE_EXPECTED_FIREWALL_IP"])
+    except (TypeError, ValueError) as exc:
+        raise AzureRuntimeConfigurationError("Azure firewall next hop is invalid") from exc
+    if (
+        firewall.version != 4 or not firewall.is_private
+        or firewall.is_loopback or firewall.is_link_local
+        or firewall.is_multicast or firewall.is_unspecified or firewall.is_reserved
+    ):
+        raise AzureRuntimeConfigurationError("Azure firewall next hop must be a private IPv4 address")
+    if not isinstance(flows, list) or not 1 <= len(flows) <= 64:
+        raise AzureRuntimeConfigurationError("Azure outbound flow allowlist must contain 1 to 64 entries")
+    seen = set()
+    for flow in flows:
+        if not isinstance(flow, dict) or set(flow) != {"protocol", "port", "destination"}:
+            raise AzureRuntimeConfigurationError("Azure outbound flow entry is invalid")
+        if flow["protocol"] not in ("Tcp", "Udp"):
+            raise AzureRuntimeConfigurationError("Azure outbound flow protocol is invalid")
+        port = flow["port"]
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise AzureRuntimeConfigurationError("Azure outbound flow port is invalid")
+        try:
+            destination = ipaddress.ip_network(flow["destination"], strict=False)
+        except (TypeError, ValueError) as exc:
+            raise AzureRuntimeConfigurationError("Azure outbound flow destination is invalid") from exc
+        if (
+            destination.version != 4 or destination.prefixlen == 0
+            or destination.is_multicast or destination.is_unspecified
+        ):
+            raise AzureRuntimeConfigurationError("Azure outbound flow destination must be a bounded IPv4 CIDR")
+        key = (flow["protocol"], port, str(destination))
+        if key in seen:
+            raise AzureRuntimeConfigurationError("Azure outbound flow allowlist contains duplicates")
+        seen.add(key)
 
 
 def _managed_identity_configured(env: Mapping[str, str]) -> bool:
@@ -133,8 +171,7 @@ def build_azure_provider_from_env(env, github_app, runner_online_checker):
         raise AzureRuntimeConfigurationError("Azure projected run cost must be finite and positive")
     try:
         flows = json.loads(config["DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON"])
-        if not isinstance(flows, list) or not flows:
-            raise ValueError("outbound flow allowlist must be a non-empty JSON array")
+        _validate_egress_configuration(config, flows)
 
         credential = ManagedIdentityCredential(env=values)
         arm = AzureArmClient(
