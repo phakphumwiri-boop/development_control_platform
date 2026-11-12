@@ -41,7 +41,7 @@ The Infrastructure Manager is a separate provider-neutral inventory API. It is c
 | #45 | Validate Azure firewall/egress configuration and Guest profile Key Vault references in read-only preflight | Merged |
 | #46 | Wire the Gateway to verified GitHub runner cleanup and confirm runner absence after deregistration | Merged |
 
-CI validation on these PR heads passed. The Windows Runner Acceptance job remained skipped according to its existing explicit opt-in gate. The main-branch push workflows for PR #46 were still running when this roadmap was reconciled; check the current Actions state before using this document as release evidence.
+CI validation on these PR heads passed. The Windows Runner Acceptance job remained skipped according to its existing explicit opt-in gate. Post-merge push workflows also passed on main commit `66acbf0352f99d67898600494dc537e19f306fd9`: Validate Control Plane run `43266934859` and Local-first Minimal Emulator run `43266934906`.
 
 ## Readiness gates that must remain separate
 
