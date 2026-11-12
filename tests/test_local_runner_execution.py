@@ -44,7 +44,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             command, windows=True, executable=executable
         )
         self.assertIsInstance(actual, str)
-        command_processor = os.environ.get("COMSPEC") or r"C:\Windows\System32\cmd.exe"
+        command_processor = FlutterBuildExecutor._trusted_windows_command_processor()
         self.assertEqual(
             actual,
             f'"{command_processor}" /d /v:off /s /c '
@@ -61,6 +61,14 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             FlutterBuildExecutor._process_command(command, windows=False, executable=posix_executable),
             [posix_executable, *command[1:]],
         )
+
+    def test_windows_batch_launcher_rejects_untrusted_comspec(self):
+        with patch.dict(os.environ, {
+            "SystemRoot": r"C:\Windows",
+            "COMSPEC": r"C:\Temp\cmd.exe",
+        }):
+            with self.assertRaisesRegex(ExecutionError, "COMSPEC must resolve"):
+                FlutterBuildExecutor._trusted_windows_command_processor()
 
     def test_windows_batch_path_quotes_cmd_metacharacters_and_disables_expansion(self):
         command = ("flutter", "test", "--no-pub")
