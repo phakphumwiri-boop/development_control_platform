@@ -6,7 +6,7 @@ from urllib.parse import quote
 from urllib.request import Request,urlopen
 from tools.runner_backend.provider import RunnerInstance
 class AzureProvisionError(RuntimeError): pass
-API_COMPUTE="2024-03-01"; API_NETWORK="2023-09-01"
+API_COMPUTE="2024-03-01"; API_NETWORK="2025-05-01"
 class AzureArmClient:
  def __init__(self,subscription_id,resource_group,credential,timeout=30):
   if not re.fullmatch(r"[0-9a-fA-F-]{36}",subscription_id): raise ValueError("Invalid Azure subscription ID")
@@ -16,22 +16,33 @@ class AzureArmClient:
   return "https://management.azure.com/subscriptions/"+self.subscription_id+"/resourceGroups/"+quote(self.resource_group,safe="")+"/providers/"+provider+"/"+resource_type+"/"+quote(name,safe="")+"?api-version="+api_version
  def resource_id(self,provider,resource_type,name):
   return "/subscriptions/"+self.subscription_id+"/resourceGroups/"+self.resource_group+"/providers/"+provider+"/"+resource_type+"/"+name
- def request(self,method,url,payload=None,allow_missing=False):
+ def request_with_metadata(self,method,url,payload=None):
   token=self.credential.get_token("https://management.azure.com/")
   body=None if payload is None else json.dumps(payload,separators=(",",":")).encode()
   req=Request(url,data=body,method=method,headers={"Accept":"application/json","Content-Type":"application/json","User-Agent":"DCP-Azure-VM-Provisioner/1.0"})
   req.add_unredirected_header("Authorization","Bearer "+token)
   try:
-   with urlopen(req,timeout=self.timeout) as response: raw=response.read(65537)
+   with urlopen(req,timeout=self.timeout) as response:
+    raw=response.read(65537); status=response.status; headers=dict(response.headers.items())
   except HTTPError as exc:
-   if allow_missing and exc.code==404: return None
    raise AzureProvisionError("Azure Resource Manager returned HTTP "+str(exc.code)) from exc
-  except (URLError,TimeoutError) as exc: raise AzureProvisionError("Azure Resource Manager request failed: "+type(exc).__name__) from exc
+  except (URLError,TimeoutError) as exc:
+   raise AzureProvisionError("Azure Resource Manager request failed: "+type(exc).__name__) from exc
   if len(raw)>65536: raise AzureProvisionError("Azure response exceeded size limit")
-  if not raw: return {}
+  if not raw: return status,headers,{}
   try: data=json.loads(raw.decode("utf-8"))
   except (UnicodeDecodeError,json.JSONDecodeError) as exc: raise AzureProvisionError("Azure returned malformed JSON") from exc
   if not isinstance(data,dict): raise AzureProvisionError("Azure returned an invalid response shape")
+  return status,headers,data
+ def request(self,method,url,payload=None,allow_missing=False):
+  try:
+   status,headers,data=self.request_with_metadata(method,url,payload)
+  except AzureProvisionError as exc:
+   if allow_missing and "HTTP 404" in str(exc): return None
+   raise
+  if status < 200 or status >= 300:
+   if allow_missing and status==404: return None
+   raise AzureProvisionError("Azure Resource Manager returned HTTP "+str(status))
   return data
 class AzureVMProvider:
  budget_provider="azure"
@@ -57,14 +68,8 @@ class AzureVMProvider:
    return {"ready":False,"message":"Protected GitHub runner bootstrap is not configured"}
   if not callable(self.online):
    return {"ready":False,"message":"Independent GitHub runner-online verification is not configured"}
-  if not callable(self.network_policy):
-   return {"ready":False,"message":"Subnet and NSG egress policy verification is not configured"}
-  try:
-   verified=self.network_policy(os_name,self.subnet_id,self.nsg_id)
-  except Exception:
-   verified=False
-  if verified is not True:
-   return {"ready":False,"message":"Runner network egress policy has not been verified"}
+  if not callable(getattr(self.network_policy,"verify_nic",None)):
+   return {"ready":False,"message":"ARM-backed effective NIC egress verifier is not configured"}
   return {"ready":True,"message":"Protected bootstrap, runner-online check, and network policy are configured"}
  def _url(self,provider,kind,name,version=API_COMPUTE): return self.arm.resource_url(provider,kind,name,version)
  def _names(self,run_id):
@@ -90,6 +95,10 @@ class AzureVMProvider:
   vm_create_started=False
   try:
    self.arm.request("PUT",nic_url,nic_body)
+   if not callable(getattr(self.network_policy,"verify_nic",None)):
+    raise AzureProvisionError("ARM-backed effective NIC egress verifier is required")
+   if self.network_policy.verify_nic(nic_id,self.nsg_id,self.subnet_id) is not True:
+    raise AzureProvisionError("Effective Azure NIC egress policy was not verified")
    vm_create_started=True
    self.arm.request("PUT",vm_url,vm_body)
   except Exception as original:
