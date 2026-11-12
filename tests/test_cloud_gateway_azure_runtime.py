@@ -98,6 +98,14 @@ class AzureRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "bounded IPv4 CIDR"):
             azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
 
+    def test_opt_in_rejects_identity_endpoint_userinfo(self):
+        env = valid_environment()
+        env.pop("DCP_AZURE_USE_IMDS")
+        env["IDENTITY_ENDPOINT"] = "http://user:pass@localhost:1234/identity"
+        env["IDENTITY_HEADER"] = "platform-header"
+        with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "managed identity"):
+            azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
+
     def test_opt_in_rejects_invalid_budget_projection(self):
         env = valid_environment()
         env["DCP_AZURE_PROJECTED_RUN_COST_USD"] = "inf"
