@@ -373,6 +373,173 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
         self.assertNotIn(self.token, html)
         self.assertNotIn(self.secret, html)
 
+        with urlopen(self.base + "/recon-back-box/", timeout=3) as response:
+            recon_html = response.read().decode("utf-8")
+            self.assertEqual(response.status, 200)
+        self.assertIn("Recon Back Box", recon_html)
+        self.assertIn("/api/recon", recon_html)
+        self.assertNotIn("https://api.github.com", recon_html)
+
+
+
+    def test_recon_reads_require_owner_session_and_use_gateway_proxy(self):
+        self.cookie_jar.clear()
+        denied, _, _ = self.request("/api/recon/repository")
+        self.assertEqual(denied, 401)
+
+        _, _, preauth_body = self.request("/api/auth/session")
+        csrf = json.loads(preauth_body)["csrfToken"]
+        logged_in, _, _ = self.request(
+            "/api/auth/login",
+            "POST",
+            {"username": "owner-test", "password": "correct horse battery staple 2026!"},
+            csrf,
+        )
+        self.assertEqual(logged_in, 200)
+
+        payload = b'{"full_name":"phakphum12345/Drive-letter","private":false}'
+        with patch.object(self.app, "gateway_request", return_value=(200, payload)) as gateway_call:
+            status, _, body = self.request("/api/recon/repository")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["full_name"], "phakphum12345/Drive-letter")
+        self.assertEqual(gateway_call.call_args.args[0:2], ("GET", "/api/recon/repository"))
+
+        unknown, _, _ = self.request("/api/not-allowlisted")
+        self.assertEqual(unknown, 404)
+
+
+class LocalRunnerCredentialFileTests(unittest.TestCase):
+    def test_missing_runner_credential_file_returns_empty_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            self.assertEqual(auth.load_runner_tokens(Path(temp) / "missing.json"), {})
+
+    def test_gateway_environment_uses_protected_file_runner_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            credentials = {"windows-local-01": "r" * 48}
+            path.write_text(json.dumps(credentials), encoding="utf-8")
+            with patch.object(auth, "RUNNER_TOKENS_FILE", path), patch.object(
+                auth, "GATEWAY_LOCAL_SETTINGS_FILE", Path(temp) / "missing-settings.json"
+            ):
+                env = auth.gateway_child_environment({
+                    "PATH": "safe-path",
+                    "DCP_RUNNER_TOKENS": "inherited-value-must-be-overridden",
+                })
+            self.assertEqual(
+                json.loads(env["DCP_RUNNER_TOKENS"]),
+                credentials,
+            )
+            self.assertEqual(env["PATH"], "safe-path")
+
+    def test_loads_local_gateway_repository_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "gateway-local-settings.json"
+            allowed = ["owner/mobile-app", "org/another-app"]
+            path.write_text(json.dumps({"allowed_repositories": allowed}), encoding="utf-8")
+            self.assertEqual(
+                auth.load_gateway_local_settings(path),
+                {"allowed_repositories": allowed},
+            )
+
+    def test_gateway_environment_applies_local_repository_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "gateway-local-settings.json"
+            path.write_text(
+                json.dumps({"allowed_repositories": ["owner/mobile-app"]}),
+                encoding="utf-8",
+            )
+            with patch.object(auth, "GATEWAY_LOCAL_SETTINGS_FILE", path):
+                env = auth.gateway_child_environment({"PATH": "safe-path"})
+            self.assertEqual(
+                env["DCP_GATEWAY_ALLOWED_REPOSITORIES"],
+                "owner/mobile-app",
+            )
+
+    def test_rejects_invalid_local_gateway_repository_allowlist(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "gateway-local-settings.json"
+            for settings in (
+                {"allowed_repositories": "owner/repo"},
+                {"allowed_repositories": ["owner/repo", "OWNER/REPO"]},
+                {"allowed_repositories": ["../repo"]},
+                {"allowed_repositories": ["owner/repo"] , "unexpected": True},
+            ):
+                with self.subTest(settings=settings):
+                    path.write_text(json.dumps(settings), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        auth.load_gateway_local_settings(path)
+
+    def test_gateway_environment_keeps_explicit_environment_when_no_file_exists(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.object(auth, "RUNNER_TOKENS_FILE", Path(temp) / "missing.json"), patch.object(
+                auth, "GATEWAY_LOCAL_SETTINGS_FILE", Path(temp) / "missing-settings.json"
+            ):
+                env = auth.gateway_child_environment({"DCP_RUNNER_TOKENS": '{"worker":"' + "x" * 40 + '"}'})
+            self.assertIn("DCP_RUNNER_TOKENS", env)
+
+    def test_loads_valid_local_runner_credential_map(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            credentials = {
+                "windows-local-01": "a" * 48,
+                "linux-build-01": "b" * 48,
+            }
+            path.write_text(json.dumps(credentials), encoding="utf-8")
+            self.assertEqual(auth.load_runner_tokens(path), credentials)
+
+    def test_rejects_invalid_or_duplicate_runner_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            for credentials in (
+                [],
+                {"bad/worker": "a" * 48},
+                {"worker": "short"},
+                {"worker-a": "a" * 48, "worker-b": "a" * 48},
+            ):
+                with self.subTest(credentials=list(credentials) if isinstance(credentials, dict) else credentials):
+                    path.write_text(json.dumps(credentials), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        auth.load_runner_tokens(path)
+
+    def test_rejects_duplicate_json_worker_keys(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            path.write_text(
+                '{"worker":"' + "a" * 48 + '","worker":"' + "b" * 48 + '"}',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(SystemExit, "invalid JSON"):
+                auth.load_runner_tokens(path)
+
+    def test_rejects_broken_symlink_runner_credential_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            link = Path(temp) / "runner-tokens.json"
+            try:
+                link.symlink_to(Path(temp) / "missing-target.json")
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is not available on this host")
+            with self.assertRaisesRegex(SystemExit, "symlink"):
+                auth.load_runner_tokens(link)
+
+    def test_rejects_symlink_runner_credential_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            actual = root / "actual.json"
+            actual.write_text(json.dumps({"worker": "a" * 48}), encoding="utf-8")
+            link = root / "runner-tokens.json"
+            try:
+                link.symlink_to(actual)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is not available on this host")
+            with self.assertRaisesRegex(SystemExit, "symlink"):
+                auth.load_runner_tokens(link)
+
+    def test_rejects_oversized_runner_credential_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner-tokens.json"
+            path.write_text(" " * (auth.MAX_RUNNER_TOKEN_FILE_BYTES + 1), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "size limit"):
+                auth.load_runner_tokens(path)
 
 if __name__ == "__main__":
     unittest.main()

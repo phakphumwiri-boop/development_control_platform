@@ -9,21 +9,26 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same PR/branch to avoid stale queued runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux-minimal-emulator:
     name: Linux Minimal Emulator (Gateway + health + safe defaults)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install Gateway runtime dependency
-        run: python -m pip install --disable-pip-version-check -r requirements-cloud-gateway.txt
-      - name: Install test dependencies
-        run: |
-          python -m pip install --disable-pip-version-check PyYAML
-          python -m pip install --disable-pip-version-check -r requirements-mcp.txt
+          cache: pip
+          cache-dependency-path: |
+            requirements-cloud-gateway.txt
+            requirements-mcp.txt
+      - name: Install Gateway and test dependencies
+        run: python -m pip install --disable-pip-version-check PyYAML -r requirements-cloud-gateway.txt -r requirements-mcp.txt
       - name: Run local diagnostics and unit tests
         env:
           DCP_GATEWAY_PROVISIONING_ENABLED: "false"
@@ -86,10 +91,12 @@ jobs:
     name: Windows 11 local Auth Proxy + Gateway end-to-end
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-cloud-gateway.txt
       - name: Install Gateway runtime dependency
         run: python -m pip install --disable-pip-version-check -r requirements-cloud-gateway.txt
       - name: Parse all local PowerShell launchers
@@ -135,6 +142,12 @@ jobs:
             if ($login.authenticated -ne $true) { throw 'Local password login failed.' }
             $session = Invoke-RestMethod -Uri "$base/api/auth/session" -WebSession $web -TimeoutSec 5
             if ($session.authenticated -ne $true -or $session.user.role -ne 'owner') { throw 'Owner session was not established.' }
+            # Re-request the dashboard with the same cookie jar, as a browser reload would,
+            # and prove the HttpOnly session remains authenticated across navigation.
+            $dashboardAfterLogin = Invoke-WebRequest -Uri "$base/" -WebSession $web -UseBasicParsing -TimeoutSec 5
+            if ($dashboardAfterLogin.StatusCode -ne 200) { throw 'Dashboard reload after login failed.' }
+            $sessionAfterReload = Invoke-RestMethod -Uri "$base/api/auth/session" -WebSession $web -TimeoutSec 5
+            if ($sessionAfterReload.authenticated -ne $true -or $sessionAfterReload.user.role -ne 'owner') { throw 'Owner session did not survive dashboard reload.' }
             $status = Invoke-RestMethod -Uri "$base/api/cloud-runners/status" -WebSession $web -TimeoutSec 5
             if ($status.gateway -ne 'READY' -or $status.provisioning_enabled -ne $false) { throw 'Signed browser-session to Gateway API request failed or safe defaults changed.' }
             $logoutHeaders = @{ Origin = $base; 'X-CSRF-Token' = $session.csrfToken }
@@ -143,7 +156,20 @@ jobs:
             $denied = $false
             try { Invoke-WebRequest -Uri "$base/api/cloud-runners/status" -WebSession $web -UseBasicParsing -TimeoutSec 5 | Out-Null } catch { $code = [int]$_.Exception.Response.StatusCode; if ($code -eq 401) { $denied = $true } else { throw } }
             if (-not $denied) { throw 'Gateway API remained accessible after logout.' }
-            Write-Host 'PASS: Windows Dashboard -> password login -> HttpOnly session -> signed HMAC Gateway API -> logout/revocation.'
+            # A fresh pre-auth CSRF session must allow an explicit re-login after logout.
+            $reauthPreauth = Invoke-RestMethod -Uri "$base/api/auth/session" -WebSession $web -TimeoutSec 5
+            if ($reauthPreauth.authenticated -ne $false -or $reauthPreauth.csrfToken.Length -lt 32) { throw 'Fresh pre-auth session was not issued after logout.' }
+            $reauthHeaders = @{ Origin = $base; 'X-CSRF-Token' = $reauthPreauth.csrfToken }
+            $relogin = Invoke-RestMethod -Uri "$base/api/auth/login" -Method Post -WebSession $web -Headers $reauthHeaders -ContentType 'application/json' -Body $loginBody -TimeoutSec 10
+            if ($relogin.authenticated -ne $true) { throw 'Owner could not log in again after logout.' }
+            $reloginSession = Invoke-RestMethod -Uri "$base/api/auth/session" -WebSession $web -TimeoutSec 5
+            if ($reloginSession.authenticated -ne $true -or $reloginSession.user.role -ne 'owner') { throw 'Re-login did not establish a fresh owner session.' }
+            $reloginStatus = Invoke-RestMethod -Uri "$base/api/cloud-runners/status" -WebSession $web -TimeoutSec 5
+            if ($reloginStatus.gateway -ne 'READY' -or $reloginStatus.provisioning_enabled -ne $false) { throw 'Gateway access did not recover after re-login or safe defaults changed.' }
+            $relogoutHeaders = @{ Origin = $base; 'X-CSRF-Token' = $reloginSession.csrfToken }
+            $relogout = Invoke-RestMethod -Uri "$base/api/auth/logout" -Method Post -WebSession $web -Headers $relogoutHeaders -TimeoutSec 5
+            if ($relogout.authenticated -ne $false) { throw 'Second logout did not revoke the re-login session.' }
+            Write-Host 'PASS: Windows Dashboard reload -> login -> signed Gateway API -> logout/revocation -> re-login -> second logout.'
           } finally {
             $stackProcesses = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match '(?i)-m\s+tools\.(local_auth_proxy|cloud_gateway\.server)' }
             foreach ($proc in $stackProcesses) { Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction SilentlyContinue }

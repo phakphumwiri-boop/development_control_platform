@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -282,9 +283,6 @@ class DashboardControlCenterV2Tests(unittest.TestCase):
             with self.subTest(expected=expected):
                 self.assertIn(expected, HTML)
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
     def test_shared_github_account_and_repository_selector_contract(self):
         for expected in (
             'id="repo-selector"', 'id="shared-owner"', 'id="shared-owner-custom"',
@@ -293,8 +291,38 @@ if __name__ == "__main__":
             'api("/users/"+encodeURIComponent(owner))',
             'api("/users/"+encodeURIComponent(owner)+"/repos?type=public&sort=updated&per_page=100")',
             '["repo-name","pr-repo","ev-repo","ros-api-repository"]',
-            'Permission: UNKNOWN', 'does not switch linked GitHub connector account',
+            'Permission: UNKNOWN', 'ไม่สลับ linked GitHub connector account',
             'Private repositories',
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, HTML)
+
+    def test_code_navigator_covers_all_dashboard_views(self):
+        expected = {
+            "home", "account", "code-navigator", "cloud-runners", "infrastructure",
+            "dev-tools", "ui-routes", "ui-simulator", "route-colors", "github-api",
+            "repo-selector", "repo", "pr", "user", "workspace", "evidence",
+            "gates", "checkpoint", "audit",
+        }
+        match = re.search(r"const CODE_NAV_MAPPINGS=\[(.*?)\n\];", HTML, re.DOTALL)
+        self.assertIsNotNone(match, "Code Navigator mapping registry must exist")
+        mapped = set(re.findall(r'id:"([^"]+)"', match.group(1)))
+        self.assertEqual(expected, mapped)
+        for contract in (
+            'id:"account",label:"Password Login"',
+            'id:"code-navigator",label:"Code Navigator"',
+            'id:"cloud-runners",label:"Cloud Runner Control"',
+            'id:"infrastructure",label:"Infrastructure Manager"',
+            'id:"repo-selector",label:"Account & Repo"',
+            'id:"user",label:"User Explorer"',
+            "GET /api/auth/session",
+            "DisabledProvider",
+            "Fake Provider only",
+            "Private repositories and effective permissions are UNKNOWN",
+        ):
+            with self.subTest(contract=contract):
+                self.assertIn(contract, HTML)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

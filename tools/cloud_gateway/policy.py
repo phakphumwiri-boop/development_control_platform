@@ -6,6 +6,10 @@ from typing import Mapping
 PROFILES={"linux":{"image":"ubuntu-24.04-x64","labels":["self-hosted","Linux","X64","dcp-cloud-linux"],"provider":"azure"},"windows":{"image":"windows-2025-x64","labels":["self-hosted","Windows","X64","dcp-cloud-windows"],"provider":"azure"},"macos":{"image":"macos-15-arm64","labels":["self-hosted","macOS","ARM64","dcp-cloud-macos"],"provider":"orka"}}
 FIELDS={"repository","workflow_run_id","commit_sha","target_os","image","labels","ephemeral","max_runtime_minutes","network_policy","registration_token_handling"}
 REPO=re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"); SHA=re.compile(r"^[0-9a-f]{40}$")
+def valid_repository_name(value):
+ if not isinstance(value,str) or not REPO.fullmatch(value): return False
+ owner,name=value.split("/",1)
+ return owner not in (".","..") and name not in (".","..")
 class PolicyDenied(ValueError):
  def __init__(self,message,status_code=403): super().__init__(message); self.status_code=status_code
 @dataclass(frozen=True)
@@ -24,7 +28,7 @@ class GatewaySettings:
    return n
   return cls(flag("DCP_GATEWAY_PROVISIONING_ENABLED"),flag("DCP_GATEWAY_OWNER_APPROVED"),tuple(x.strip() for x in e.get("DCP_GATEWAY_ALLOWED_REPOSITORIES","").split(",") if x.strip()),amount("DCP_GATEWAY_BUDGET_LIMIT_USD"),amount("DCP_GATEWAY_CURRENT_SPEND_USD"),amount("DCP_GATEWAY_PROJECTED_RUN_COST_USD"),flag("DCP_GATEWAY_CIRCUIT_BREAKER"),int(e.get("DCP_GATEWAY_MAX_CONCURRENT","1")),int(e.get("DCP_GATEWAY_MAX_RUNTIME_MINUTES","180")),e.get("DCP_GATEWAY_API_TOKEN",""))
  def validate_configuration(self):
-  if any(not isinstance(x,str) or not REPO.fullmatch(x) for x in self.allowed_repositories) or len(set(self.allowed_repositories))!=len(self.allowed_repositories): raise ValueError("Invalid or duplicate repository allowlist")
+  if any(not valid_repository_name(x) for x in self.allowed_repositories) or len(set(self.allowed_repositories))!=len(self.allowed_repositories): raise ValueError("Invalid or duplicate repository allowlist")
   if not 1<=self.max_concurrent_runners<=100: raise ValueError("Concurrency must be 1..100")
   if not 5<=self.max_runtime_minutes<=180: raise ValueError("Runtime must be 5..180 minutes")
   for value in (self.budget_limit_usd,self.current_spend_usd,self.projected_run_cost_usd):
@@ -41,7 +45,7 @@ class GatewaySettings:
 def validate_runner_request(payload,settings,repository_authorizer=None):
  if not isinstance(payload,dict) or set(payload)!=FIELDS: raise PolicyDenied("Request fields do not match contract",400)
  repo=payload["repository"]
- if not isinstance(repo,str) or not REPO.fullmatch(repo): raise PolicyDenied("Invalid owner/name repository",400)
+ if not valid_repository_name(repo): raise PolicyDenied("Invalid owner/name repository",400)
  if callable(repository_authorizer):
   try:
    allowed=repository_authorizer(repo)
