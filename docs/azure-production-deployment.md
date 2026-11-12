@@ -70,6 +70,14 @@ Gateway configuration must be injected from the deployment secret integration, n
 - `DCP_GATEWAY_ALLOWED_REPOSITORIES` restricted to the reviewed exact allowlist.
 - Budget, concurrency, runtime, and circuit-breaker values set to conservative reviewed limits.
 
+The read-only preflight also validates these Azure-specific configuration references without reading secret values:
+- `DCP_AZURE_EXPECTED_FIREWALL_IP` — the approved private IPv4 address of the Azure Firewall/NVA next hop.
+- `DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON` — a JSON array of 1–64 exact flows, each containing only `protocol` (`Tcp` or `Udp`), `port` (1–65535), and `destination` (an IPv4 CIDR other than `0.0.0.0/0`). Example shape: `[{"protocol":"Tcp","port":443,"destination":"203.0.113.0/24"}]`.
+- `DCP_AZURE_LINUX_ADMIN_USERNAME` and `DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME` — the Linux administrator name and Key Vault secret name holding its SSH public key.
+- `DCP_AZURE_WINDOWS_ADMIN_USERNAME` and `DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME` — the Windows administrator name and Key Vault secret name holding its password.
+
+These names define a configuration contract for preflight only. A syntax PASS is not proof that Key Vault contains valid material, that Azure has applied the network policy, or that guest login works. The runtime provider remains disabled until a separate reviewed composition change and the live acceptance gates below are complete.
+
 Do not set provisioning to true simply because the service starts. The current runtime is intentionally wired to `DisabledProvider`, and the Azure provider adapter still needs verified guest login, effective egress controls, lifecycle checks, and real acceptance tests.
 
 ## 5. Deployment sequence and release gates
