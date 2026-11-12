@@ -6,6 +6,7 @@ services, or provisions infrastructure.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import math
 import os
@@ -43,6 +44,72 @@ def _valid_amount(value: str) -> bool:
     except (TypeError, ValueError):
         return False
     return math.isfinite(amount) and amount > 0
+
+
+def _valid_firewall_ip(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except (TypeError, ValueError):
+        return False
+    return (
+        address.version == 4
+        and address.is_private
+        and not (
+            address.is_loopback or address.is_link_local
+            or address.is_multicast or address.is_unspecified
+            or address.is_reserved
+        )
+    )
+
+
+def _valid_outbound_flows(value: str) -> bool:
+    try:
+        flows = json.loads(value)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(flows, list) or not 1 <= len(flows) <= 64:
+        return False
+    seen = set()
+    for flow in flows:
+        if not isinstance(flow, dict) or set(flow) != {"protocol", "port", "destination"}:
+            return False
+        protocol = flow.get("protocol")
+        port = flow.get("port")
+        destination = flow.get("destination")
+        if protocol not in ("Tcp", "Udp"):
+            return False
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            return False
+        if not isinstance(destination, str):
+            return False
+        try:
+            network = ipaddress.ip_network(destination, strict=False)
+        except ValueError:
+            return False
+        if network.version != 4 or network.prefixlen == 0 or network.is_multicast or network.is_unspecified:
+            return False
+        key = (protocol, port, str(network))
+        if key in seen:
+            return False
+        seen.add(key)
+    return True
+
+
+def _valid_guest_profile_references(env: Mapping[str, str]) -> bool:
+    linux_user = env.get("DCP_AZURE_LINUX_ADMIN_USERNAME", "")
+    windows_user = env.get("DCP_AZURE_WINDOWS_ADMIN_USERNAME", "")
+    linux_key_name = env.get("DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME", "")
+    windows_password_name = env.get("DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME", "")
+    user_pattern = r"[a-z_][a-z0-9_-]{0,31}"
+    reserved = {"root", "admin", "administrator", "guest"}
+    return (
+        bool(re.fullmatch(user_pattern, linux_user))
+        and linux_user not in reserved
+        and bool(re.fullmatch(user_pattern, windows_user))
+        and windows_user not in reserved
+        and bool(re.fullmatch(r"[A-Za-z0-9-]{1,127}", linux_key_name))
+        and bool(re.fullmatch(r"[A-Za-z0-9-]{1,127}", windows_password_name))
+    )
 
 
 def _resource_id(value: str, subscription: str, kind: str) -> bool:
@@ -145,8 +212,40 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
     add("azure_configuration_presence", "PASS" if azure_valid else ("UNKNOWN" if not azure_present else "FAIL"),
         "Azure resource IDs, budget projection, VM sizes, and pinned runner artifacts are syntactically valid"
         if azure_valid else "Azure configuration is missing or contains invalid identifiers/values; values are not echoed")
+    network_names = (
+        "DCP_AZURE_EXPECTED_FIREWALL_IP",
+        "DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON",
+    )
+    network_any = any(_present(values, name) for name in network_names)
+    network_present = all(_present(values, name) for name in network_names)
+    network_valid = (
+        network_present
+        and _valid_firewall_ip(values.get("DCP_AZURE_EXPECTED_FIREWALL_IP", ""))
+        and _valid_outbound_flows(values.get("DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON", ""))
+    )
+    add(
+        "azure_network_policy_configuration",
+        "PASS" if network_valid else ("FAIL" if network_any else "UNKNOWN"),
+        "Private firewall IP and bounded outbound flow allowlist are syntactically valid"
+        if network_valid else "Requires a private IPv4 firewall IP and a non-empty, bounded TCP/UDP CIDR/port allowlist",
+    )
     add("azure_network_policy", "UNKNOWN",
         "Subnet/NSG and effective egress policy require independent live verification")
+    guest_names = (
+        "DCP_AZURE_LINUX_ADMIN_USERNAME",
+        "DCP_AZURE_LINUX_SSH_PUBLIC_KEY_SECRET_NAME",
+        "DCP_AZURE_WINDOWS_ADMIN_USERNAME",
+        "DCP_AZURE_WINDOWS_ADMIN_PASSWORD_SECRET_NAME",
+    )
+    guest_any = any(_present(values, name) for name in guest_names)
+    guest_present = all(_present(values, name) for name in guest_names)
+    guest_valid = guest_present and _valid_guest_profile_references(values)
+    add(
+        "azure_guest_profile_configuration",
+        "PASS" if guest_valid else ("FAIL" if guest_any else "UNKNOWN"),
+        "Linux/Windows administrator names and Key Vault secret references are syntactically valid"
+        if guest_valid else "Requires valid Linux/Windows administrator names and Key Vault secret names; secret values are never read",
+    )
     add("azure_guest_profile", "UNKNOWN",
         "Guest login profile and protected bootstrap require deployment-specific verification")
 
