@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same PR/branch to avoid stale queued runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -26,11 +31,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-mcp.txt
+            requirements-cloud-gateway.txt
 
       - name: Install validators and local MCP SDK
-        run: |
-          python -m pip install --disable-pip-version-check PyYAML jsonschema
-          python -m pip install --disable-pip-version-check -r requirements-mcp.txt
+        run: python -m pip install --disable-pip-version-check PyYAML jsonschema -r requirements-mcp.txt
 
       - name: Set up Node.js 24 for dashboard JavaScript and browser checks
         uses: actions/setup-node@v7
@@ -273,6 +280,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-cloud-gateway.txt
 
       - name: Install cloud gateway test dependency
         run: python -m pip install --disable-pip-version-check -r requirements-cloud-gateway.txt
