@@ -192,6 +192,7 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
         data=None,
         csrf=None,
         origin=True,
+        extra_headers=None,
     ):
         headers = {
             "Accept": "application/json",
@@ -205,6 +206,8 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
 
         if csrf:
             headers["X-CSRF-Token"] = csrf
+        if extra_headers:
+            headers.update(extra_headers)
 
         req = Request(
             self.base + path,
@@ -315,6 +318,21 @@ class LocalAuthProxyEndToEndTests(unittest.TestCase):
 
         self.assertEqual(api["gateway"], "READY")
         self.assertFalse(api["provisioning_enabled"])
+
+        # Browser-supplied DCP identity headers must not be forwarded.
+        spoofed_status, _, spoofed_body = self.request(
+            "/api/cloud-runners/status",
+            extra_headers={
+                "X-DCP-User": "attacker",
+                "X-DCP-Role": "owner",
+                "X-DCP-Session": "attacker_session_123",
+                "X-DCP-Auth-Timestamp": "1",
+                "X-DCP-Auth-Nonce": "attacker_nonce_12345",
+                "X-DCP-Auth-Signature": "0" * 64,
+            },
+        )
+        self.assertEqual(spoofed_status, 200, spoofed_body.decode(errors="replace"))
+        self.assertEqual(json.loads(spoofed_body)["gateway"], "READY")
 
         no_csrf, _, _ = self.request(
             "/api/auth/logout",
