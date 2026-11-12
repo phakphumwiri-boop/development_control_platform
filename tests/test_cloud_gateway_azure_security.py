@@ -21,7 +21,7 @@ class CredentialTests(unittest.TestCase):
 class AzureArmHeaderTests(unittest.TestCase):
  def test_arm_bearer_token_is_unredirected(self):
   credential=MagicMock(); credential.get_token.return_value="arm-token"
-  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b"{}"
+  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b"{}"; response.status=200; response.headers={}
   with patch("tools.cloud_gateway.azure_vm.urlopen",return_value=response) as call:
    AzureArmClient("00000000-0000-0000-0000-000000000000","dcp",credential).request("GET","https://management.azure.com/subscriptions/test")
   req=call.call_args.args[0]
