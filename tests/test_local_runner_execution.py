@@ -70,6 +70,13 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         self.assertIn(r'"C:\Flutter&SDK\bin\flutter.cmd"', actual)
         self.assertIn("/d /v:off /s /c", actual)
 
+    def test_windows_batch_path_rejects_network_shares(self):
+        with self.assertRaisesRegex(ExecutionError, "absolute local Windows path"):
+            FlutterBuildExecutor._process_command(
+                ("flutter", "test"), windows=True,
+                executable=r"\\server\share\flutter.cmd",
+            )
+
     def test_windows_batch_path_rejects_percent_expansion(self):
         with self.assertRaisesRegex(ExecutionError, "unsafe command characters"):
             FlutterBuildExecutor._process_command(
