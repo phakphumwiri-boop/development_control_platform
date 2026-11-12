@@ -157,9 +157,15 @@ def _managed_identity_configured(env: Mapping[str, str]) -> bool:
             return False
         try:
             parsed = urlparse(endpoint)
+            _ = parsed.port
         except ValueError:
             return False
-        return parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        return (
+            parsed.scheme == "http"
+            and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+            and parsed.username is None and parsed.password is None
+            and not parsed.fragment
+        )
     return use_imds.lower() == "true"
 
 
