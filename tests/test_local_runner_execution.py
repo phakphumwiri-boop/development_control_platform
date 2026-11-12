@@ -44,24 +44,37 @@ class FlutterBuildExecutorTests(unittest.TestCase):
             command, windows=True, executable=executable
         )
         self.assertIsInstance(actual, str)
-        expected = (
-            subprocess.list2cmdline([
-                os.environ.get("COMSPEC") or str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "cmd.exe")
-            ])
-            + " /d /s /c "
-            + '"' + subprocess.list2cmdline([executable, *command[1:]]) + '"'
+        command_processor = os.environ.get("COMSPEC") or r"C:\Windows\System32\cmd.exe"
+        self.assertEqual(
+            actual,
+            f'"{command_processor}" /d /v:off /s /c '
+            + f'"{subprocess.list2cmdline([executable, *command[1:]])}"',
         )
-        self.assertEqual(actual, expected)
         self.assertEqual(
             FlutterBuildExecutor._process_command(
                 command, windows=True, executable=r"C:\Flutter\bin\flutter.exe"
             ),
-            list(command),
+            [r"C:\Flutter\bin\flutter.exe", *command[1:]],
         )
         self.assertEqual(
             FlutterBuildExecutor._process_command(command, windows=False, executable=executable),
-            list(command),
+            [executable, *command[1:]],
         )
+
+    def test_windows_batch_path_quotes_cmd_metacharacters_and_disables_expansion(self):
+        command = ("flutter", "test", "--no-pub")
+        actual = FlutterBuildExecutor._process_command(
+            command, windows=True, executable=r"C:\Flutter&SDK\bin\flutter.cmd"
+        )
+        self.assertIn(r'"C:\Flutter&SDK\bin\flutter.cmd"', actual)
+        self.assertIn("/d /v:off /s /c", actual)
+
+    def test_windows_batch_path_rejects_percent_expansion(self):
+        with self.assertRaisesRegex(ExecutionError, "unsafe command characters"):
+            FlutterBuildExecutor._process_command(
+                ("flutter", "test"), windows=True,
+                executable=r"C:\Flutter%PATH%\bin\flutter.cmd",
+            )
 
     def test_build_environment_isolates_caches_and_preserves_android_toolchain(self):
         with patch.dict("os.environ", {
@@ -216,8 +229,8 @@ class FlutterBuildExecutorTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Requires the real Windows cmd.exe batch-file launcher")
 class WindowsFlutterBatchShimAcceptanceTests(FlutterBuildExecutorTests):
-    def test_executes_flutter_cmd_shim_from_path_with_spaces(self):
-        bin_dir = self.root / "Flutter SDK" / "bin"
+    def test_executes_flutter_cmd_shim_from_path_with_cmd_metacharacters(self):
+        bin_dir = self.root / "Flutter&SDK" / "bin"
         bin_dir.mkdir(parents=True)
         args_file = self.root / "captured Flutter args.txt"
         flutter_cmd = bin_dir / "flutter.cmd"
