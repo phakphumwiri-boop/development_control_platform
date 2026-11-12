@@ -206,8 +206,12 @@ class AzureEffectiveNetworkPolicyVerifier:
         for route in routes:
             if not isinstance(route, dict):
                 raise EffectiveNetworkPolicyError("Effective route entry is malformed")
-            prefix = route.get("addressPrefix")
-            if prefix == "0.0.0.0/0":
+            prefixes = route.get("addressPrefix")
+            if isinstance(prefixes, str):
+                prefixes = [prefixes]
+            if not isinstance(prefixes, list) or any(not isinstance(item, str) for item in prefixes):
+                continue
+            if "0.0.0.0/0" in prefixes:
                 defaults.append(route)
         if not defaults:
             raise EffectiveNetworkPolicyError("No effective IPv4 default route was returned")
@@ -221,9 +225,13 @@ class AzureEffectiveNetworkPolicyVerifier:
             active_defaults.append(route)
             if route.get("nextHopType") != "VirtualAppliance":
                 raise EffectiveNetworkPolicyError("Active default route bypasses the approved firewall")
-            next_hop = route.get("nextHopIp")
+            next_hops = route.get("nextHopIpAddress")
+            if isinstance(next_hops, str):
+                next_hops = [next_hops]
+            if not isinstance(next_hops, list) or len(next_hops) != 1 or not isinstance(next_hops[0], str):
+                raise EffectiveNetworkPolicyError("Default route must identify exactly one firewall next hop")
             try:
-                if ipaddress.ip_address(next_hop) != ipaddress.ip_address(self.expected_firewall_ip):
+                if ipaddress.ip_address(next_hops[0]) != ipaddress.ip_address(self.expected_firewall_ip):
                     raise EffectiveNetworkPolicyError("Default route next hop does not match the approved firewall")
             except ValueError as exc:
                 raise EffectiveNetworkPolicyError("Default route next hop is missing or invalid") from exc
