@@ -1,5 +1,6 @@
 """Mock-only Azure VM provisioner tests. No ARM resources are created."""
 import unittest
+from unittest.mock import Mock
 from tools.cloud_gateway.azure_vm import AzureVMProvider,AzureProvisionError
 from tools.runner_backend.manager import PLATFORM_PROFILES
 SUB="00000000-0000-0000-0000-000000000000"
@@ -53,10 +54,27 @@ class AzureVMTests(unittest.TestCase):
  def test_effective_egress_deny_prevents_vm_create_and_cleans_nic(self):
   policy=FakeNetworkPolicy(False)
   p,arm=self.make(network=policy)
+  bootstrap_factory=Mock(side_effect=bootstrap)
+  p.bootstrap_factory=bootstrap_factory
   with self.assertRaises(AzureProvisionError): p.provision(payload("linux"))
   self.assertEqual(len(policy.calls),1)
+  bootstrap_factory.assert_not_called()
   self.assertFalse(any(call[0]=="PUT" and "Microsoft.Compute/virtualMachines/" in call[1] for call in arm.calls))
   self.assertTrue(any(call[0]=="DELETE" and "networkInterfaces/" in call[1] for call in arm.calls))
+ def test_bootstrap_token_factory_runs_only_after_effective_egress_passes(self):
+  events=[]
+  class OrderedPolicy:
+   def verify_nic(self,nic_id,nsg_id,subnet_id):
+    events.append("effective-egress")
+    return True
+  def ordered_bootstrap(vm_name,os_name,request_payload):
+   events.append("bootstrap-token")
+   return bootstrap(vm_name,os_name,request_payload)
+  p,_=self.make(network=OrderedPolicy())
+  p.bootstrap_factory=ordered_bootstrap
+  p.provision(payload("linux"))
+  self.assertEqual(events,["effective-egress","bootstrap-token"])
+
  def test_partial_vm_create_failure_retains_provider_id_for_reconciliation(self):
   p,arm=self.make(); arm.fail_vm_put=True
   with self.assertRaises(AzureProvisionError) as caught: p.provision(payload("linux"))
