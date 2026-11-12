@@ -198,14 +198,12 @@ class AzureEffectiveNetworkPolicyVerifier:
             nic = self._resource_id(nic_id)
             if f"/subscriptions/{self.arm.subscription_id.lower()}/" not in nic:
                 raise EffectiveNetworkPolicyError("NIC is outside the configured subscription")
-            nsg_url = self.arm.resource_url(
+            nic_url = self.arm.resource_url(
                 "Microsoft.Network", "networkInterfaces",
                 nic.rsplit("/", 1)[-1], API_NETWORK
-            ) + "/effectiveNetworkSecurityGroups?api-version=" + API_NETWORK
-            route_url = self.arm.resource_url(
-                "Microsoft.Network", "networkInterfaces",
-                nic.rsplit("/", 1)[-1], API_NETWORK
-            ) + "/effectiveRouteTable?api-version=" + API_NETWORK
+            ).split("?", 1)[0]
+            nsg_url = nic_url + "/effectiveNetworkSecurityGroups?api-version=" + API_NETWORK
+            route_url = nic_url + "/effectiveRouteTable?api-version=" + API_NETWORK
             nsg = self._arm_result("POST", nsg_url, {})
             routes = self._arm_result("POST", route_url, {})
             self._verify_nsg(nsg, nic_id)
