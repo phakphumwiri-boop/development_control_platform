@@ -71,6 +71,7 @@ Gateway configuration must be injected from the deployment secret integration, n
 - `DCP_GATEWAY_ALLOWED_REPOSITORIES` restricted to the reviewed exact allowlist.
 - Budget, concurrency, runtime, and circuit-breaker values set to conservative reviewed limits.
 - `DCP_AZURE_PROVIDER_ENABLED=false` by default. Set to `true` only to compose the Azure adapter; it is not a provisioning approval.
+- Managed identity must be available through the platform-provided loopback `IDENTITY_ENDPOINT` + `IDENTITY_HEADER`, or through explicit `DCP_AZURE_USE_IMDS=true` on an approved IMDS-capable host. Never log or copy `IDENTITY_HEADER`.
 - Explicit pinned Marketplace image fields: `DCP_AZURE_LINUX_IMAGE_PUBLISHER`, `DCP_AZURE_LINUX_IMAGE_OFFER`, `DCP_AZURE_LINUX_IMAGE_SKU`, `DCP_AZURE_LINUX_IMAGE_VERSION`, and the corresponding `DCP_AZURE_WINDOWS_IMAGE_*` fields. `latest` is forbidden.
 
 The read-only preflight also validates these Azure-specific configuration references without reading secret values:
