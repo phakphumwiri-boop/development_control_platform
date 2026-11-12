@@ -16,10 +16,15 @@ class FakeArm:
   if self.fail_vm_put and method=="PUT" and "Microsoft.Compute/virtualMachines/" in url: raise RuntimeError("simulated VM create uncertainty")
   if "Microsoft.Network/networkInterfaces/" in url:
    if method=="GET": return {"properties":{"provisioningState":"Succeeded"}} if self.nic_exists else None
-   if method=="DELETE": return {}
+   if method=="DELETE":
+    self.nic_exists=False
+    return {}
   return self.get_result if method=="GET" else {}
 class FakeNetworkPolicy:
- def verify_nic(self,nic_id,nsg_id,subnet_id): return True
+ def __init__(self,allow=True): self.allow=allow; self.calls=[]
+ def verify_nic(self,nic_id,nsg_id,subnet_id):
+  self.calls.append((nic_id,nsg_id,subnet_id))
+  return self.allow
 
 def bootstrap(vm,os_name,payload):
  os_profile={"computerName":vm,"adminUsername":"dcpadmin"}
@@ -44,6 +49,13 @@ class AzureVMTests(unittest.TestCase):
    self.assertEqual(vm["networkProfile"]["networkInterfaces"][0]["id"],f"/subscriptions/{SUB}/resourceGroups/dcp/providers/Microsoft.Network/networkInterfaces/{arm.calls[0][1].split('/')[-1].split('?')[0]}")
    self.assertNotIn("identity",vm); self.assertEqual(vm["tags"]["managed-by"],"dcp-cloud-runner")
    self.assertIn("protectedSettings",vm["resources"][0]["properties"])
+ def test_effective_egress_deny_prevents_vm_create_and_cleans_nic(self):
+  policy=FakeNetworkPolicy(False)
+  p,arm=self.make(network=policy)
+  with self.assertRaises(AzureProvisionError): p.provision(payload("linux"))
+  self.assertEqual(len(policy.calls),1)
+  self.assertFalse(any(call[0]=="PUT" and "Microsoft.Compute/virtualMachines/" in call[1] for call in arm.calls))
+  self.assertTrue(any(call[0]=="DELETE" and "networkInterfaces/" in call[1] for call in arm.calls))
  def test_partial_vm_create_failure_retains_provider_id_for_reconciliation(self):
   p,arm=self.make(); arm.fail_vm_put=True
   with self.assertRaises(AzureProvisionError) as caught: p.provision(payload("linux"))
