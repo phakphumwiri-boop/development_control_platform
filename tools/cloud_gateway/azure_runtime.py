@@ -78,12 +78,12 @@ def _validate_static_configuration(config: Mapping[str, str]) -> None:
         raise AzureRuntimeConfigurationError("Azure location is invalid")
     subnet_pattern = (
         r"^/subscriptions/" + re.escape(subscription)
-        + r"/resourceGroups/[A-Za-z0-9_.()-]{1,90}/providers/Microsoft\\.Network/"
+        + r"/resourceGroups/[A-Za-z0-9_.()-]{1,90}/providers/Microsoft\.Network/"
         + r"virtualNetworks/[^/]+/subnets/[^/]+$"
     )
     nsg_pattern = (
         r"^/subscriptions/" + re.escape(subscription)
-        + r"/resourceGroups/[A-Za-z0-9_.()-]{1,90}/providers/Microsoft\\.Network/"
+        + r"/resourceGroups/[A-Za-z0-9_.()-]{1,90}/providers/Microsoft\.Network/"
         + r"networkSecurityGroups/[^/]+$"
     )
     if not re.fullmatch(subnet_pattern, config["DCP_AZURE_SUBNET_ID"], re.IGNORECASE):
