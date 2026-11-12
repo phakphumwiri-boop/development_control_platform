@@ -40,7 +40,10 @@ class OIDCAuthService:
 
     def complete_callback(self, query_string: str, browser_binding: str,
                           now: int | None = None) -> tuple[str, dict]:
-        params = parse_qs(query_string, keep_blank_values=True, strict_parsing=False)
+        if not isinstance(query_string, str) or len(query_string) > 8192:
+            raise OIDCError("OIDC callback query is missing or too large")
+        params = parse_qs(query_string, keep_blank_values=True, strict_parsing=False,
+                          max_num_fields=32)
         states, codes, errors = params.get("state", []), params.get("code", []), params.get("error", [])
         if len(states) != 1 or not states[0]:
             raise OIDCError("OIDC callback must contain exactly one state")
