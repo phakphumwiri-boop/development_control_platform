@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -32,10 +32,13 @@ jobs:
           python -m pip install --disable-pip-version-check PyYAML jsonschema
           python -m pip install --disable-pip-version-check -r requirements-mcp.txt
 
-      - name: Set up Node for dashboard JavaScript syntax check
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 24 for dashboard JavaScript and browser checks
+        uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
+          package-manager-cache: false
+      - name: Verify Node.js runtime
+        run: node --version
 
       - name: Check embedded dashboard JavaScript syntax
         run: |
@@ -264,10 +267,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -339,7 +342,7 @@ jobs:
     runs-on: [self-hosted, Windows, X64, "${{ matrix.runner_label }}"]
     steps:
       - name: Checkout repository for workspace test
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Verify Windows runner identity
         shell: pwsh
