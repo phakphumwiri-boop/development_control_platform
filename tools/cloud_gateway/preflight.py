@@ -284,9 +284,12 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
         else:
             try:
                 identity_url = urlparse(identity_endpoint)
+                _ = identity_url.port
                 identity_endpoint_valid = (
                     identity_url.scheme == "http"
                     and identity_url.hostname in ("localhost", "127.0.0.1", "::1")
+                    and identity_url.username is None and identity_url.password is None
+                    and not identity_url.fragment
                 )
             except ValueError:
                 identity_endpoint_valid = False
