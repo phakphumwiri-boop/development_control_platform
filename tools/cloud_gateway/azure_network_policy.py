@@ -194,6 +194,22 @@ class AzureEffectiveNetworkPolicyVerifier:
             except ValueError as exc:
                 raise EffectiveNetworkPolicyError("Default route next hop is missing or invalid") from exc
 
+    def _wait_for_nic(self, nic_name):
+        url = self.arm.resource_url(
+            "Microsoft.Network", "networkInterfaces", nic_name, API_NETWORK
+        )
+        deadline = self.clock() + self.timeout_seconds
+        while self.clock() < deadline:
+            data = self.arm.request("GET", url, allow_missing=True)
+            if isinstance(data, dict):
+                state = data.get("properties", {}).get("provisioningState")
+                if state == "Succeeded":
+                    return
+                if state in ("Failed", "Canceled", "Deleting", "Deleted"):
+                    raise EffectiveNetworkPolicyError("Azure NIC provisioning did not succeed")
+            self.sleep(self.poll_interval or 1)
+        raise EffectiveNetworkPolicyError("Azure NIC did not reach Succeeded before egress verification")
+
     def verify_nic(self, nic_id, expected_nsg_id, subnet_id):
         try:
             if self._resource_id(expected_nsg_id) != self.expected_nsg_id:
@@ -201,9 +217,11 @@ class AzureEffectiveNetworkPolicyVerifier:
             nic = self._resource_id(nic_id)
             if f"/subscriptions/{self.arm.subscription_id.lower()}/" not in nic:
                 raise EffectiveNetworkPolicyError("NIC is outside the configured subscription")
+            nic_name = nic.rsplit("/", 1)[-1]
+            self._wait_for_nic(nic_name)
             nic_url = self.arm.resource_url(
                 "Microsoft.Network", "networkInterfaces",
-                nic.rsplit("/", 1)[-1], API_NETWORK
+                nic_name, API_NETWORK
             ).split("?", 1)[0]
             nsg_url = nic_url + "/effectiveNetworkSecurityGroups?api-version=" + API_NETWORK
             route_url = nic_url + "/effectiveRouteTable?api-version=" + API_NETWORK
