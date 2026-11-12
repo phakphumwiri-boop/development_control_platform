@@ -7,7 +7,9 @@ The adapter is disabled unless DCP_AZURE_PROVIDER_ENABLED=true.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
+from urllib.parse import urlparse
 
 from .azure_identity import ManagedIdentityCredential
 from .azure_network_policy import AzureEffectiveNetworkPolicyVerifier
@@ -26,6 +28,8 @@ _REQUIRED = (
     "DCP_AZURE_LOCATION",
     "DCP_AZURE_SUBNET_ID",
     "DCP_AZURE_NSG_ID",
+    "DCP_AZURE_BUDGET_NAME",
+    "DCP_AZURE_PROJECTED_RUN_COST_USD",
     "DCP_AZURE_LINUX_VM_SIZE",
     "DCP_AZURE_WINDOWS_VM_SIZE",
     "DCP_AZURE_LINUX_IMAGE_PUBLISHER",
@@ -57,6 +61,23 @@ def _required_values(env: Mapping[str, str]) -> dict[str, str]:
             "Azure provider configuration is incomplete: " + ", ".join(missing)
         )
     return {name: env[name].strip() for name in _REQUIRED}
+
+
+def _managed_identity_configured(env: Mapping[str, str]) -> bool:
+    endpoint = env.get("IDENTITY_ENDPOINT", "")
+    header = env.get("IDENTITY_HEADER", "")
+    use_imds = env.get("DCP_AZURE_USE_IMDS", "false")
+    if not isinstance(use_imds, str) or use_imds.lower() not in ("true", "false"):
+        return False
+    if endpoint or header:
+        if not isinstance(endpoint, str) or not isinstance(header, str) or not endpoint or not header:
+            return False
+        try:
+            parsed = urlparse(endpoint)
+        except ValueError:
+            return False
+        return parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+    return use_imds.lower() == "true"
 
 
 def _image_references(values: Mapping[str, str]) -> dict[str, dict[str, str]]:
@@ -95,8 +116,20 @@ def build_azure_provider_from_env(env, github_app, runner_online_checker):
         raise AzureRuntimeConfigurationError(
             "Azure provider requires the configured GitHub App and online checker"
         )
+    if not _managed_identity_configured(values):
+        raise AzureRuntimeConfigurationError(
+            "Azure provider requires a trusted managed identity endpoint or explicit IMDS mode"
+        )
 
     config = _required_values(values)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,63}", config["DCP_AZURE_BUDGET_NAME"]):
+        raise AzureRuntimeConfigurationError("Azure budget name is invalid")
+    try:
+        projected_cost = float(config["DCP_AZURE_PROJECTED_RUN_COST_USD"])
+    except ValueError as exc:
+        raise AzureRuntimeConfigurationError("Azure projected run cost is invalid") from exc
+    if not projected_cost > 0 or not __import__("math").isfinite(projected_cost):
+        raise AzureRuntimeConfigurationError("Azure projected run cost must be finite and positive")
     try:
         flows = json.loads(config["DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON"])
         if not isinstance(flows, list) or not flows:
