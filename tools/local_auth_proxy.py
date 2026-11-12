@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -30,6 +31,101 @@ COOKIE = "DCP_LOCAL_SESSION"
 MAX_BODY = 32_768
 ALLOWED_GET = ("/api/cloud-runners/status", "/api/cloud-runners")
 CREDENTIALS = Path(os.getenv("DCP_LOCAL_AUTH_CREDENTIAL_FILE", str(Path(os.getenv("LOCALAPPDATA", str(Path.home()))) / "DCP" / "owner-auth.json")))
+
+
+RUNNER_TOKENS_FILE = CREDENTIALS.parent / "runner-tokens.json"
+GATEWAY_LOCAL_SETTINGS_FILE = CREDENTIALS.parent / "gateway-local-settings.json"
+MAX_RUNNER_TOKEN_FILE_BYTES = 64 * 1024
+MAX_GATEWAY_LOCAL_SETTINGS_BYTES = 16 * 1024
+
+
+def _unique_runner_token_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate worker ID")
+        result[key] = value
+    return result
+
+
+def load_runner_tokens(path: Path | None = None) -> dict[str, str]:
+    """Load the protected local Runner token map without logging or exposing secrets."""
+    target = Path(path) if path is not None else RUNNER_TOKENS_FILE
+    if target.is_symlink():
+        raise SystemExit("Local Runner credential file must not be a symlink")
+    if not target.exists():
+        return {}
+    if not target.is_file():
+        raise SystemExit("Local Runner credential file must be a regular non-symlink file")
+    if target.stat().st_size > MAX_RUNNER_TOKEN_FILE_BYTES:
+        raise SystemExit("Local Runner credential file exceeds its size limit")
+    try:
+        value = json.loads(
+            target.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_runner_token_object,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise SystemExit("Local Runner credential file is unreadable or invalid JSON") from None
+    if not isinstance(value, dict) or not 1 <= len(value) <= 16:
+        raise SystemExit("Local Runner credential file must contain 1..16 worker credentials")
+    for worker, token in value.items():
+        if (
+            not isinstance(worker, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker)
+            or not isinstance(token, str)
+            or len(token) < 32
+            or len(token) > 256
+        ):
+            raise SystemExit("Local Runner credential file contains an invalid worker credential")
+    if len(set(value.values())) != len(value):
+        raise SystemExit("Local Runner credentials must be unique per worker")
+    return value
+
+
+def load_gateway_local_settings(path: Path | None = None) -> dict:
+    """Load non-secret, operator-approved local Gateway settings."""
+    target = Path(path) if path is not None else GATEWAY_LOCAL_SETTINGS_FILE
+    if target.is_symlink():
+        raise SystemExit("Local Gateway settings file must not be a symlink")
+    if not target.exists():
+        return {}
+    if not target.is_file() or target.stat().st_size > MAX_GATEWAY_LOCAL_SETTINGS_BYTES:
+        raise SystemExit("Local Gateway settings file is not a bounded regular file")
+    try:
+        value = json.loads(
+            target.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_runner_token_object,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        raise SystemExit("Local Gateway settings file is unreadable or invalid JSON") from None
+    if not isinstance(value, dict) or set(value) != {"allowed_repositories"}:
+        raise SystemExit("Local Gateway settings file has an invalid schema")
+    repositories = value.get("allowed_repositories")
+    if not isinstance(repositories, list) or len(repositories) > 20:
+        raise SystemExit("Local Gateway repository allowlist must contain at most 20 entries")
+    seen = set()
+    for repository in repositories:
+        if (
+            not isinstance(repository, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository)
+            or any(part in (".", "..") for part in repository.split("/"))
+            or repository.lower() in seen
+        ):
+            raise SystemExit("Local Gateway repository allowlist contains an invalid or duplicate entry")
+        seen.add(repository.lower())
+    return {"allowed_repositories": repositories}
+
+
+def gateway_child_environment(base_environment=None) -> dict[str, str]:
+    """Prepare the Gateway environment, overriding any inherited Runner map with the protected file."""
+    env = dict(os.environ if base_environment is None else base_environment)
+    runner_tokens = load_runner_tokens()
+    if runner_tokens:
+        env["DCP_RUNNER_TOKENS"] = json.dumps(runner_tokens, separators=(",", ":"))
+    local_settings = load_gateway_local_settings()
+    if "allowed_repositories" in local_settings:
+        env["DCP_GATEWAY_ALLOWED_REPOSITORIES"] = ",".join(local_settings["allowed_repositories"])
+    return env
 
 
 def password_record(username: str, password: str, salt: bytes | None = None) -> dict:
@@ -263,7 +359,7 @@ def make_handler(app: LocalAuthProxy, dashboard_dir: Path):
                     return self.send_json(401, {"error": "authenticated session required"})
                 if path not in ALLOWED_GET and not (
                     path.startswith("/api/cloud-runners/") and path.count("/") == 3
-                ):
+                ) and not path.startswith("/api/recon/"):
                     return self.send_json(404, {"error": "not found"})
                 status, data = app.gateway_request("GET", path, session)
                 return self.send_bytes(status, data)
@@ -271,6 +367,10 @@ def make_handler(app: LocalAuthProxy, dashboard_dir: Path):
             target = (root / relative).resolve()
             if root not in target.parents and target != root:
                 return self.send_json(404, {"error": "not found"})
+            if target.is_dir():
+                target = (target / "index.html").resolve()
+                if root not in target.parents:
+                    return self.send_json(404, {"error": "not found"})
             if not target.is_file():
                 return self.send_json(404, {"error": "not found"})
             types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -354,7 +454,7 @@ def main():
     credentials = load_or_create_credentials()
     gateway_token = secrets.token_urlsafe(48)
     proxy_secret = secrets.token_urlsafe(48)
-    env = os.environ.copy()
+    env = gateway_child_environment()
     env.update({
         "DCP_GATEWAY_HOST": HOST, "DCP_GATEWAY_PORT": str(GATEWAY_PORT),
         "DCP_GATEWAY_API_TOKEN": gateway_token, "DCP_TRUSTED_PROXY_HMAC_SECRET": proxy_secret,

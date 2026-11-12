@@ -16,12 +16,19 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .policy import GatewaySettings, PolicyDenied
+from .policy import GatewaySettings, PolicyDenied, valid_repository_name
 from .service import GatewayService
 from .provider_router import ProviderRouter
 from .store import LifecycleConflict, RunnerStore
 from .github_app_runtime import build_github_app_runtime
+from .public_github import PublicGitHubRepositoryCatalog
 from .job_control import JobConflict, JobNotFound, JobStore
+from .artifacts import ArtifactError, ArtifactStore
+from .runner_registry import RunnerRegistry, WorkerNotFound
+from .scheduler import RunnerScheduler, RunnerNotEligible, RunnerNotRegistered
+from .infrastructure import (FakeInfrastructureProvider, InfrastructureManager,
+                             InfrastructureStore, ProviderUnavailable, ResourceNotFound)
+from .recon_api import ReconAPIError, fetch_recon_resource
 
 
 class DisabledProvider:
@@ -159,6 +166,33 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
         def job_store(self):
             return getattr(service, "job_store", None)
 
+        def artifact_store(self):
+            return getattr(service, "artifact_store", None)
+
+        def runner_registry(self):
+            return getattr(service, "runner_registry", None)
+
+        def infrastructure_manager(self):
+            return getattr(service, "infrastructure_manager", None)
+
+        def runner_scheduler(self):
+            scheduler = getattr(service, "runner_scheduler", None)
+            if scheduler is not None:
+                return scheduler
+            jobs = self.job_store()
+            registry = self.runner_registry()
+            if jobs is None or registry is None:
+                return None
+            scheduler = RunnerScheduler(jobs, registry, self.infrastructure_manager())
+            service.runner_scheduler = scheduler
+            return scheduler
+
+        @staticmethod
+        def public_infrastructure(row):
+            keys = ("id", "provider_id", "target_os", "image_id", "template_id",
+                    "state", "created_at", "updated_at", "metadata")
+            return {key: row.get(key) for key in keys}
+
         @staticmethod
         def public_job(row):
             keys = ("id", "repository", "commit_sha", "target", "state",
@@ -197,6 +231,19 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def do_GET(self):
             path = urlparse(self.path).path
+            if path.startswith("/api/recon/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated session required"})
+                if identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(403, {"error": "dashboard role required"})
+                try:
+                    payload = fetch_recon_resource(path)
+                except ReconAPIError as exc:
+                    return self.send_json(exc.status, {"error": exc.public_message})
+                except Exception:
+                    return self.send_json(502, {"error": "Recon source service unavailable"})
+                return self.send_json(200, payload)
             if path == "/healthz":
                 return self.send_json(200, {
                     "status": "ok",
@@ -225,6 +272,13 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     if len(parts) == 1:
                         row = jobs.get(parts[0])
                         return self.send_json(200, self.public_job(row)) if row else self.send_json(404, {"error": "not found"})
+                    if len(parts) == 2 and parts[1] == "artifacts":
+                        if jobs.get(parts[0]) is None:
+                            return self.send_json(404, {"error": "not found"})
+                        artifacts = self.artifact_store()
+                        if artifacts is None:
+                            return self.send_json(503, {"error": "artifact storage unavailable"})
+                        return self.send_json(200, {"artifacts": artifacts.list_for_job(parts[0])})
                     if len(parts) == 2 and parts[1] == "events":
                         return self.send_json(200, {"events": jobs.events(parts[0])})
                     if len(parts) == 2 and parts[1] == "logs":
@@ -234,9 +288,81 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                         return self.send_json(200, {"logs": jobs.logs(parts[0], after_id, limit)})
                 except JobNotFound:
                     return self.send_json(404, {"error": "not found"})
+                except ArtifactError:
+                    return self.send_json(400, {"error": "invalid artifact request"})
                 except ValueError:
                     return self.send_json(400, {"error": "invalid pagination"})
                 return self.send_json(404, {"error": "not found"})
+            if path == "/api/runners":
+                identity = self.proxy_identity()
+                if not identity or identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                registry = self.runner_registry()
+                if registry is None:
+                    return self.send_json(503, {"error": "local Runner registry unavailable"})
+                return self.send_json(200, {"runners": registry.list_workers()})
+            if path == "/api/infrastructure" or path.startswith("/api/infrastructure/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                if identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(403, {"error": "dashboard role required"})
+                manager = self.infrastructure_manager()
+                if manager is None:
+                    return self.send_json(503, {"error": "Infrastructure Manager unavailable"})
+                try:
+                    if path == "/api/infrastructure":
+                        query = parse_qs(urlparse(self.path).query)
+                        if query.get("view", [""])[0] == "catalog":
+                            return self.send_json(200, manager.catalog())
+                        return self.send_json(200, {"resources": [
+                            self.public_infrastructure(row) for row in manager.list_resources()]})
+                    parts = path[len("/api/infrastructure/"):].split("/")
+                    resource_id = parts[0]
+                    if not re.fullmatch(r"[0-9a-f-]{36}", resource_id):
+                        return self.send_json(400, {"error": "invalid resource id"})
+                    if len(parts) == 2 and parts[1] == "events":
+                        return self.send_json(200, {"events": manager.store.events(resource_id)})
+                    if len(parts) != 1:
+                        return self.send_json(404, {"error": "not found"})
+                    row = manager.inspect(resource_id)
+                    return self.send_json(200, self.public_infrastructure(row))
+                except ResourceNotFound:
+                    return self.send_json(404, {"error": "resource not found"})
+                except LifecycleConflict:
+                    return self.send_json(409, {"error": "infrastructure state conflict"})
+                except Exception:
+                    return self.send_json(503, {"error": "Infrastructure Manager operation failed"})
+            if path.startswith("/api/artifacts/") and path.endswith("/download"):
+                identity = self.proxy_identity()
+                if not identity or identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                artifact_id = path[len("/api/artifacts/"):-len("/download")].strip("/")
+                artifacts = self.artifact_store()
+                if artifacts is None:
+                    return self.send_json(503, {"error": "artifact storage unavailable"})
+                try:
+                    metadata, handle = artifacts.open(artifact_id)
+                except ArtifactError:
+                    return self.send_json(404, {"error": "artifact not found"})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(metadata["size"]))
+                self.send_header("Content-Disposition", "attachment; filename=" + metadata["name"])
+                self.send_header("ETag", chr(34) + metadata["sha256"] + chr(34))
+                self.send_header("Cache-Control", "private, no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                try:
+                    with handle:
+                        while True:
+                            chunk = handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             if path.startswith("/api/"):
                 identity = self.proxy_identity()
                 if not identity:
@@ -259,7 +385,7 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     if len(parts) not in (3, 4):
                         return self.send_json(404, {"error": "not found"})
                     repository = unquote(parts[0]) + "/" + unquote(parts[1])
-                    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository):
+                    if not valid_repository_name(repository):
                         return self.send_json(400, {"error": "invalid repository"})
                     if len(parts) == 4 and parts[2] == "projects":
                         commit_sha = unquote(parts[3])
@@ -417,6 +543,48 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def do_POST(self):
             path = urlparse(self.path).path
+            if path == "/api/infrastructure" or path.startswith("/api/infrastructure/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                if identity.get("role") not in ("owner", "operator"):
+                    return self.send_json(403, {"error": "dashboard role required"})
+                if not self.same_origin():
+                    return self.send_json(403, {"error": "same-origin request required"})
+                if not self.csrf_valid(identity):
+                    return self.send_json(403, {"error": "CSRF validation failed"})
+                manager = self.infrastructure_manager()
+                if manager is None:
+                    return self.send_json(503, {"error": "Infrastructure Manager unavailable"})
+                try:
+                    if path == "/api/infrastructure":
+                        payload = self.body()
+                        key = self.headers.get("Idempotency-Key", "")
+                        row, created = manager.create(
+                            target_os=payload.get("target_os"),
+                            image_id=payload.get("image_id"),
+                            template_id=payload.get("template_id"),
+                            idempotency_key=key,
+                            provider_id=payload.get("provider_id"),
+                        )
+                        return self.send_json(201 if created else 200, self.public_infrastructure(row))
+                    parts = path[len("/api/infrastructure/"):].split("/")
+                    if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
+                        return self.send_json(400, {"error": "invalid infrastructure action"})
+                    resource_id, action = parts
+                    if action not in ("start", "stop", "restart"):
+                        return self.send_json(404, {"error": "not found"})
+                    self.body()
+                    row = getattr(manager, action)(resource_id)
+                    return self.send_json(200, self.public_infrastructure(row))
+                except ResourceNotFound:
+                    return self.send_json(404, {"error": "resource not found"})
+                except ProviderUnavailable:
+                    return self.send_json(503, {"error": "selected provider unavailable"})
+                except (ValueError, LifecycleConflict) as exc:
+                    return self.send_json(409, {"error": str(exc)})
+                except Exception:
+                    return self.send_json(503, {"error": "Infrastructure Manager operation failed"})
             if path == "/api/jobs" or path.startswith("/api/jobs/"):
                 identity = self.proxy_identity()
                 if not identity:
@@ -432,7 +600,28 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(503, {"error": "job control plane unavailable"})
                 try:
                     if path == "/api/jobs":
-                        row, created = jobs.create(self.body(), self.headers.get("Idempotency-Key", ""))
+                        payload = self.body()
+                        repository = payload.get("repository")
+                        authorizer = getattr(service, "repository_authorizer", None)
+                        if callable(authorizer):
+                            try:
+                                allowed = authorizer(repository)
+                            except Exception:
+                                raise PolicyDenied("Repository access could not be verified", 503)
+                            if allowed is not True:
+                                raise PolicyDenied("Repository is not accessible to this GitHub App installation", 403)
+                        elif repository not in service.settings.allowed_repositories:
+                            raise PolicyDenied("Repository is not allowlisted", 403)
+                        resolver = getattr(service, "repository_commit_resolver", None)
+                        if not callable(resolver):
+                            raise PolicyDenied("Immutable commit verification is unavailable", 503)
+                        try:
+                            resolved = resolver(repository, payload.get("commit_sha"))
+                        except Exception:
+                            raise PolicyDenied("Commit could not be verified", 503)
+                        if not isinstance(resolved, dict) or resolved.get("commit_sha") != payload.get("commit_sha"):
+                            raise PolicyDenied("Commit SHA does not resolve in the selected repository", 403)
+                        row, created = jobs.create(payload, self.headers.get("Idempotency-Key", ""))
                         return self.send_json(202 if created else 200, self.public_job(row))
                     suffix = path[len("/api/jobs/"):]
                     if not suffix.endswith("/cancel"):
@@ -460,16 +649,73 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                 if jobs is None:
                     return self.send_json(503, {"error": "job control plane unavailable"})
                 try:
+                    if path in ("/v1/runner/register", "/v1/runner/enroll"):
+                        registry = self.runner_registry()
+                        if registry is None:
+                            return self.send_json(503, {"error": "local Runner registry unavailable"})
+                        payload = self.body()
+                        try:
+                            # Enrollment is deliberately offline. Only a running agent
+                            # may use /register to announce liveness and become schedulable.
+                            row = registry.register(
+                                worker, payload.get("host_os"), payload.get("capabilities"),
+                                online=(path == "/v1/runner/register"),
+                            )
+                            return self.send_json(200, {"runner": row})
+                        except (ValueError, TypeError) as exc:
+                            return self.send_json(400, {"error": str(exc)})
+                    if path == "/v1/runner/ping":
+                        registry = self.runner_registry()
+                        if registry is None:
+                            return self.send_json(503, {"error": "local Runner registry unavailable"})
+                        self.body()
+                        try:
+                            return self.send_json(200, {"runner": registry.heartbeat(worker)})
+                        except WorkerNotFound:
+                            return self.send_json(409, {"error": "Runner must register before heartbeat"})
                     if path == "/v1/runner/claim":
                         payload = self.body()
                         lease = payload.get("lease_seconds", 30)
                         jobs.recover_expired_leases()
-                        row = jobs.claim(worker, lease)
+                        registry = self.runner_registry()
+                        if registry is not None:
+                            scheduler = self.runner_scheduler()
+                            if scheduler is None:
+                                return self.send_json(503, {"error": "Runner Scheduler unavailable"})
+                            try:
+                                row = scheduler.claim(worker, lease)
+                            except RunnerNotRegistered:
+                                return self.send_json(409, {"error": "Runner must register before claiming jobs"})
+                            except RunnerNotEligible:
+                                return self.send_json(409, {"error": "Runner is offline or draining"})
+                        else:
+                            return self.send_json(503, {"error": "Runner Registry unavailable; refusing unfiltered job claim"})
                         return self.send_json(200, {"job": self.public_job(row) if row else None})
                     parts = path[len("/v1/runner/"):].split("/")
                     if len(parts) != 2 or not re.fullmatch(r"[0-9a-f-]{36}", parts[0]):
                         return self.send_json(404, {"error": "not found"})
                     job_id, action = parts
+                    if action == "artifacts":
+                        artifacts = self.artifact_store()
+                        if artifacts is None:
+                            return self.send_json(503, {"error": "artifact storage unavailable"})
+                        try:
+                            size = int(self.headers.get("Content-Length", "0"))
+                        except ValueError:
+                            return self.send_json(400, {"error": "invalid Content-Length"})
+                        if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/octet-stream":
+                            return self.send_json(415, {"error": "application/octet-stream required"})
+                        if not 1 <= size <= artifacts.max_artifact_bytes:
+                            return self.send_json(413, {"error": "artifact size is outside allowed bounds"})
+                        try:
+                            metadata = artifacts.store(
+                                jobs, job_id, worker,
+                                self.headers.get("X-DCP-Artifact-Name", ""),
+                                self.rfile, size,
+                            )
+                            return self.send_json(201, {"artifact": metadata})
+                        except ArtifactError as exc:
+                            return self.send_json(409, {"error": str(exc)})
                     payload = self.body()
                     if action == "heartbeat":
                         row = jobs.heartbeat(job_id, worker, payload.get("lease_seconds", 30))
@@ -502,6 +748,25 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
                     return self.send_json(403, {"error": "CSRF validation failed"})
                 if identity.get("role") != "owner":
                     return self.send_json(403, {"error": "owner role required"})
+                if path.startswith("/api/runners/"):
+                    parts = path[len("/api/runners/"):].split("/")
+                    worker_id = unquote(parts[0]) if parts else ""
+                    if len(parts) != 2 or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker_id):
+                        return self.send_json(404, {"error": "not found"})
+                    registry = self.runner_registry()
+                    if registry is None:
+                        return self.send_json(503, {"error": "local Runner registry unavailable"})
+                    try:
+                        self.body()
+                        if parts[1] == "drain":
+                            row = registry.drain(worker_id)
+                        elif parts[1] == "enable":
+                            row = registry.enable(worker_id)
+                        else:
+                            return self.send_json(404, {"error": "not found"})
+                        return self.send_json(200, {"runner": row})
+                    except WorkerNotFound:
+                        return self.send_json(404, {"error": "Runner not found"})
                 if path != "/api/cloud-runners":
                     return self.send_json(404, {"error": "not found"})
                 try:
@@ -549,6 +814,29 @@ def make_handler(service, token, proxy_secret=None, public_origin=None, runner_t
 
         def do_DELETE(self):
             path = urlparse(self.path).path
+            if path.startswith("/api/infrastructure/"):
+                identity = self.proxy_identity()
+                if not identity:
+                    return self.send_json(401, {"error": "authenticated dashboard session required"})
+                if identity.get("role") != "owner":
+                    return self.send_json(403, {"error": "owner role required"})
+                if not self.same_origin():
+                    return self.send_json(403, {"error": "same-origin request required"})
+                if not self.csrf_valid(identity):
+                    return self.send_json(403, {"error": "CSRF validation failed"})
+                manager = self.infrastructure_manager()
+                if manager is None:
+                    return self.send_json(503, {"error": "Infrastructure Manager unavailable"})
+                resource_id = unquote(path[len("/api/infrastructure/"):])
+                if not re.fullmatch(r"[0-9a-f-]{36}", resource_id):
+                    return self.send_json(400, {"error": "invalid resource id"})
+                try:
+                    row = manager.delete(resource_id)
+                    return self.send_json(200, self.public_infrastructure(row))
+                except ResourceNotFound:
+                    return self.send_json(404, {"error": "resource not found"})
+                except Exception:
+                    return self.send_json(409, {"error": "infrastructure state conflict"})
             if path.startswith("/api/cloud-runners/"):
                 identity = self.proxy_identity()
                 if not identity:
@@ -665,16 +953,52 @@ def main():
     if not isinstance(runner_tokens, dict):
         raise SystemExit("DCP_RUNNER_TOKENS must be a JSON object")
     github_app, _, runner_cleanup = build_github_app_runtime(settings)
+    if github_app:
+        repository_catalog = github_app.list_installation_repositories
+        repository_authorizer = lambda repository: github_app.is_repository_accessible(repository, refresh=True)
+        repository_ref_catalog = github_app.list_repository_refs
+        repository_commit_resolver = github_app.resolve_repository_commit
+        repository_project_inspector = github_app.inspect_repository_project
+    else:
+        # Local-first mode can inspect explicitly allowlisted public repositories
+        # without a GitHub App. Private repositories remain unavailable until an
+        # App installation is configured.
+        public_catalog = PublicGitHubRepositoryCatalog(settings.allowed_repositories)
+        repository_catalog = public_catalog.list_repositories
+        repository_authorizer = public_catalog.is_repository_accessible
+        repository_ref_catalog = public_catalog.list_repository_refs
+        repository_commit_resolver = public_catalog.resolve_repository_commit
+        repository_project_inspector = public_catalog.inspect_repository_project
     service = GatewayService(
         settings, store, ProviderRouter(DisabledProvider(), DisabledProvider()),
         _budget_guard_from_env(settings), runner_cleanup=runner_cleanup,
-        repository_catalog=github_app.list_installation_repositories if github_app else None,
-        repository_authorizer=(lambda repository: github_app.is_repository_accessible(repository, refresh=True)) if github_app else None,
-        repository_ref_catalog=github_app.list_repository_refs if github_app else None,
-        repository_commit_resolver=github_app.resolve_repository_commit if github_app else None,
-        repository_project_inspector=github_app.inspect_repository_project if github_app else None,
+        repository_catalog=repository_catalog,
+        repository_authorizer=repository_authorizer,
+        repository_ref_catalog=repository_ref_catalog,
+        repository_commit_resolver=repository_commit_resolver,
+        repository_project_inspector=repository_project_inspector,
     )
     service.job_store = jobs_store
+    artifact_root = os.getenv("DCP_GATEWAY_ARTIFACTS_ROOT") or os.path.abspath(database_path + ".artifacts")
+    try:
+        artifact_limit = int(os.getenv("DCP_GATEWAY_MAX_ARTIFACT_BYTES", str(100 * 1024 * 1024)))
+        service.artifact_store = ArtifactStore(artifact_root, artifact_limit)
+    except (ValueError, ArtifactError) as exc:
+        raise SystemExit("DCP artifact storage configuration is invalid") from exc
+    runner_registry_path = os.getenv("DCP_GATEWAY_RUNNERS_DATABASE", database_path + ".runners")
+    try:
+        runner_stale_seconds = int(os.getenv("DCP_GATEWAY_RUNNER_STALE_SECONDS", "60"))
+        service.runner_registry = RunnerRegistry(runner_registry_path, runner_stale_seconds)
+    except (ValueError, OSError) as exc:
+        raise SystemExit("DCP Runner registry configuration is invalid") from exc
+    infrastructure_path = os.getenv("DCP_GATEWAY_INFRA_DATABASE", database_path + ".infra")
+    try:
+        service.infrastructure_manager = InfrastructureManager(
+            InfrastructureStore(infrastructure_path), {"fake": FakeInfrastructureProvider()},
+            default_provider="fake", provisioning_enabled=False,
+        )
+    except (ValueError, OSError) as exc:
+        raise SystemExit("DCP Infrastructure Manager configuration is invalid") from exc
     _start_expiry_reconciler(service, int(os.getenv("DCP_GATEWAY_RECONCILE_SECONDS", "30")))
     server = ThreadingHTTPServer(
         (host, port), make_handler(service, settings.api_token, proxy_secret, public_origin, runner_tokens)

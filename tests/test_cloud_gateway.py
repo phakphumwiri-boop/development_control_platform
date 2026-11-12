@@ -36,6 +36,15 @@ class PolicyTests(unittest.TestCase):
   for s,count,code in [(settings(owner_approved=False),0,403),(settings(circuit_breaker_tripped=True),0,503),(settings(budget_limit_usd=0),0,503),(settings(current_spend_usd=19),0,429),(settings(max_concurrent_runners=1),1,429)]:
    with self.subTest(code=code),self.assertRaises(PolicyDenied) as e: s.authorize_provisioning(count)
    self.assertEqual(e.exception.status_code,code)
+ def test_repository_dot_segments_are_rejected(self):
+  for repository in ("../repo","owner/..","./repo","owner/."):
+   with self.subTest(repository=repository):
+    invalid_settings=settings(allowed_repositories=(repository,))
+    with self.assertRaises(ValueError):
+     invalid_settings.validate_configuration()
+    bad=payload(); bad["repository"]=repository
+    with self.assertRaises(PolicyDenied):
+     validate_runner_request(bad,settings())
  def test_dynamic_repository_authorizer_replaces_static_allowlist(self):
   dynamic_settings=settings(allowed_repositories=())
   self.assertEqual(

@@ -6,6 +6,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .sqlite_security import prepare_private_sqlite_file
+
 ACTIVE = ("provisioning", "online", "terminating")
 CLEANUP_EVENTS = {"runner_cleanup_confirmed", "provider_cleanup_confirmed", "cleanup_retry"}
 TRANSITIONS = {
@@ -29,8 +31,7 @@ class RunnerStore:
     def __init__(self, path="dcp-gateway.sqlite3"):
         self.path = str(path)
         self.lock = threading.RLock()
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite_file(self.path)
         with self.db() as c:
             c.executescript("""CREATE TABLE IF NOT EXISTS runners(
                 id TEXT PRIMARY KEY,idempotency_key TEXT UNIQUE NOT NULL,

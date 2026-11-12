@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .sqlite_security import prepare_private_sqlite_file
+
 class JobConflict(RuntimeError):
     pass
 
@@ -22,8 +24,7 @@ class JobStore:
     def __init__(self, path="dcp-jobs.sqlite3"):
         self.path = str(path)
         self.lock = threading.RLock()
-        if self.path != ":memory:":
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        prepare_private_sqlite_file(self.path)
         with self.db() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS jobs (
@@ -82,7 +83,7 @@ class JobStore:
             raise ValueError("Invalid repository")
         if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
             raise ValueError("Invalid commit SHA")
-        if target not in ("test", "build", "package"):
+        if target not in ("test", "build", "package", "build_android", "build_web", "build_windows", "build_linux", "build_macos", "build_ios"):
             raise ValueError("Unsupported target")
         normalized = {"repository": repository, "commit_sha": sha, "target": target}
         fingerprint = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
@@ -140,16 +141,32 @@ class JobStore:
             db.execute("COMMIT")
         return recovered
 
-    def claim(self, worker, lease_seconds=30):
+    def claim(self, worker, lease_seconds=30, allowed_targets=None):
         if not isinstance(worker, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,100}", worker):
             raise ValueError("Invalid worker")
         if isinstance(lease_seconds, bool) or not isinstance(lease_seconds, int) or not 5 <= lease_seconds <= 300:
             raise ValueError("Invalid lease")
+        if allowed_targets is not None:
+            supported = {"test", "build", "package", "build_android", "build_web",
+                         "build_windows", "build_linux", "build_macos", "build_ios"}
+            if (not isinstance(allowed_targets, (list, tuple, set, frozenset))
+                    or any(not isinstance(item, str) or item not in supported for item in allowed_targets)):
+                raise ValueError("Invalid allowed target list")
+            allowed_targets = sorted(set(allowed_targets))
+            if not allowed_targets:
+                return None
         current = utcnow()
         expiry = (current + timedelta(seconds=lease_seconds)).isoformat()
         with self.lock, self.db() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY created_at,id LIMIT 1").fetchone()
+            if allowed_targets is None:
+                row = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY created_at,id LIMIT 1").fetchone()
+            else:
+                placeholders = ",".join("?" for _ in allowed_targets)
+                row = db.execute(
+                    f"SELECT * FROM jobs WHERE state='queued' AND target IN ({placeholders}) ORDER BY created_at,id LIMIT 1",
+                    tuple(allowed_targets),
+                ).fetchone()
             if row is None:
                 db.execute("COMMIT")
                 return None
