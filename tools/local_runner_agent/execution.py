@@ -98,6 +98,8 @@ class FlutterBuildExecutor:
         if not isinstance(resolved, str) or any(char in resolved for char in ('"', "%", "\r", "\n", "\x00")):
             raise ExecutionError("Flutter executable path contains unsafe command characters")
         if not is_windows:
+            if not Path(resolved).is_absolute():
+                raise ExecutionError("Flutter executable must resolve to an absolute path")
             return [resolved, *command[1:]]
 
         executable_path = PureWindowsPath(resolved)
