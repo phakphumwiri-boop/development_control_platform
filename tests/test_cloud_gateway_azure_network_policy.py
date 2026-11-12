@@ -63,8 +63,8 @@ class VerifierTests(unittest.TestCase):
     def test_allows_explicit_outbound_allow_and_firewall_route(self):
         arm=FakeArm()
         self.assertTrue(self.make(arm).verify_nic(NIC,NSG,SUBNET))
-        self.assertEqual(len(arm.calls),2)
-        self.assertEqual([x[0] for x in arm.calls],["POST","POST"])
+        self.assertEqual(len(arm.calls),3)
+        self.assertEqual([x[0] for x in arm.calls],["GET","POST","POST"])
     def test_denies_effective_outbound_deny(self):
         with self.assertRaises(EffectiveNetworkPolicyError):
             self.make(FakeArm(nsg=nsg_body("Deny"))).verify_nic(NIC,NSG,SUBNET)
@@ -97,7 +97,7 @@ class VerifierTests(unittest.TestCase):
             (200,{},route_body())
         ])
         self.assertTrue(self.make(arm).verify_nic(NIC,NSG,SUBNET))
-        self.assertEqual([x[0] for x in arm.calls],["POST","GET","POST"])
+        self.assertEqual([x[0] for x in arm.calls],["GET","POST","GET","POST"])
     def test_202_without_location_or_with_untrusted_location_is_rejected(self):
         for headers in ({},{"Location":"https://attacker.example/operation"}):
             arm=FakeArm(responses=[(202,headers,{})])
