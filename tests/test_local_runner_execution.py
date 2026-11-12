@@ -104,7 +104,7 @@ class FlutterBuildExecutorTests(unittest.TestCase):
         self.assertEqual(env["ANDROID_HOME"], "C:/Android/Sdk")
         self.assertEqual(env["JAVA_HOME"], "C:/Java")
         self.assertEqual(env["SystemRoot"], "C:/Windows")
-        self.assertEqual(env["COMSPEC"], "C:/Windows/System32/cmd.exe")
+        self.assertEqual(env["COMSPEC"], r"C:\Windows\System32\cmd.exe")
         self.assertTrue(env["PUB_CACHE"].startswith(str(self.workspace)))
         self.assertTrue(env["GRADLE_USER_HOME"].startswith(str(self.workspace)))
         self.assertTrue(env["TMP"].startswith(str(self.workspace)))
