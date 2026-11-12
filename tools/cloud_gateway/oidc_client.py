@@ -77,8 +77,9 @@ class OIDCProvider:
         document = self.fetch_json(issuer + "/.well-known/openid-configuration")
         if not isinstance(document, dict) or document.get("issuer") != self.issuer:
             raise OIDCError("Discovery issuer does not exactly match configured issuer")
-        if "code" not in document.get("response_types_supported", ["code"]):
-            raise OIDCError("Provider does not support authorization code flow")
+        response_types = document.get("response_types_supported")
+        if not isinstance(response_types, list) or "code" not in response_types:
+            raise OIDCError("Provider does not advertise authorization code flow")
         if "S256" not in document.get("code_challenge_methods_supported", []):
             raise OIDCError("Provider does not advertise PKCE S256 support")
         metadata = OIDCMetadata(
@@ -160,7 +161,11 @@ def _jwk_public_key(jwk: dict, algorithm: str):
         raise OIDCError("JWKS key is not a signing key")
     if jwk.get("alg") not in (None, algorithm):
         raise OIDCError("JWKS key algorithm does not match token")
-    if "key_ops" in jwk and "verify" not in jwk["key_ops"]:
+    if "key_ops" in jwk and (
+        not isinstance(jwk["key_ops"], list)
+        or any(not isinstance(operation, str) for operation in jwk["key_ops"])
+        or "verify" not in jwk["key_ops"]
+    ):
         raise OIDCError("JWKS key is not permitted for verification")
     if algorithm == "RS256" and jwk.get("kty") == "RSA":
         n = int.from_bytes(_b64url_decode(jwk["n"]), "big")
@@ -230,7 +235,11 @@ def verify_id_token(token: str, provider: OIDCProvider, client_id: str,
             or exp <= current - leeway or iat > current + leeway
             or current - iat > 86400 or nbf > current + leeway):
         raise OIDCError("ID token is expired or outside its accepted time window")
-    if not isinstance(expected_nonce, str) or not expected_nonce or claims.get("nonce") != expected_nonce:
+    import hmac
+    token_nonce = claims.get("nonce")
+    if (not isinstance(expected_nonce, str) or not expected_nonce
+            or not isinstance(token_nonce, str)
+            or not hmac.compare_digest(token_nonce, expected_nonce)):
         raise OIDCError("ID token nonce mismatch")
     if not isinstance(claims.get("sub"), str) or not claims["sub"] or len(claims["sub"]) > 255:
         raise OIDCError("ID token subject is invalid")
