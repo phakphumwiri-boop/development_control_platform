@@ -85,6 +85,19 @@ class AzureRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "managed identity"):
             azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
 
+    def test_opt_in_rejects_public_firewall_and_unbounded_outbound_flow(self):
+        env = valid_environment()
+        env["DCP_AZURE_EXPECTED_FIREWALL_IP"] = "8.8.8.8"
+        with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "private IPv4"):
+            azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
+
+        env = valid_environment()
+        env["DCP_AZURE_REQUIRED_OUTBOUND_FLOWS_JSON"] = (
+            '[{"protocol":"Tcp","port":443,"destination":"0.0.0.0/0"}]'
+        )
+        with self.assertRaisesRegex(azure_runtime.AzureRuntimeConfigurationError, "bounded IPv4 CIDR"):
+            azure_runtime.build_azure_provider_from_env(env, object(), lambda *args: True)
+
     def test_opt_in_rejects_invalid_budget_projection(self):
         env = valid_environment()
         env["DCP_AZURE_PROJECTED_RUN_COST_USD"] = "inf"
