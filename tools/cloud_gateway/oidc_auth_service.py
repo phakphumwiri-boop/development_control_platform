@@ -68,5 +68,22 @@ class OIDCAuthService:
         return session_id, {"subject": session["subject"], "role": session["role"],
                             "csrf_token": session["csrf_token"], "expires_at": session["expires_at"]}
 
+    def rotate_session(self, session_id: str):
+        """Rotate the opaque browser session handle after reauthentication."""
+        return self.sessions.rotate_session(session_id)
+
+    @staticmethod
+    def session_cookie(session_id: str, max_age: int = 43200) -> str:
+        """Build a production HTTPS cookie; callers must serve this on the configured HTTPS origin."""
+        if not isinstance(session_id, str) or not session_id or any(c in session_id for c in ";, \\r\\n"):
+            raise OIDCError("Invalid session identifier for cookie")
+        if isinstance(max_age, bool) or not isinstance(max_age, int) or not 300 <= max_age <= 86400:
+            raise OIDCError("Cookie max-age must be 300..86400 seconds")
+        return f"DCP_OIDC_SESSION={session_id}; Path=/; Max-Age={max_age}; Secure; HttpOnly; SameSite=Lax"
+
+    @staticmethod
+    def clear_session_cookie() -> str:
+        return "DCP_OIDC_SESSION=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax"
+
     def logout(self, session_id: str) -> bool:
         return self.sessions.revoke_session(session_id)
