@@ -279,15 +279,17 @@ def inspect_environment(env: Mapping[str, str] | None = None) -> dict:
     use_imds = values.get("DCP_AZURE_USE_IMDS", "false")
     identity_mode_valid = isinstance(use_imds, str) and use_imds.lower() in ("true", "false")
     if identity_endpoint or identity_header:
-        try:
-            identity_url = urlparse(identity_endpoint)
-            identity_endpoint_valid = (
-                isinstance(identity_endpoint, str) and isinstance(identity_header, str)
-                and bool(identity_header) and identity_url.scheme == "http"
-                and identity_url.hostname in ("localhost", "127.0.0.1", "::1")
-            )
-        except ValueError:
+        if not isinstance(identity_endpoint, str) or not isinstance(identity_header, str) or not identity_header:
             identity_endpoint_valid = False
+        else:
+            try:
+                identity_url = urlparse(identity_endpoint)
+                identity_endpoint_valid = (
+                    identity_url.scheme == "http"
+                    and identity_url.hostname in ("localhost", "127.0.0.1", "::1")
+                )
+            except ValueError:
+                identity_endpoint_valid = False
     else:
         identity_endpoint_valid = False
     managed_identity_valid = identity_mode_valid and (
