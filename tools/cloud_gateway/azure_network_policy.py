@@ -122,7 +122,7 @@ class AzureEffectiveNetworkPolicyVerifier:
             if not isinstance(prefix, str):
                 continue
             try:
-                if destination.subnet_of(ipaddress.ip_network(prefix, strict=False)):
+                if destination == ipaddress.ip_network(prefix, strict=False):
                     return True
             except ValueError:
                 continue
@@ -137,6 +137,8 @@ class AzureEffectiveNetworkPolicyVerifier:
         if not isinstance(prefixes, list) or not isinstance(expanded, list):
             return False
         for prefix in prefixes + expanded:
+            if prefix == "*":
+                return True
             if not isinstance(prefix, str):
                 continue
             try:
