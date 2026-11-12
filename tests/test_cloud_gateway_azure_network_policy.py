@@ -95,10 +95,31 @@ class VerifierTests(unittest.TestCase):
                 self.make(FakeArm(routes=routes)).verify_nic(NIC,NSG,SUBNET)
     def test_invalid_overridden_default_route_does_not_override_active_firewall_route(self):
         routes={"value":[
-            route_body("10.20.0.9",state="Invalid"),
-            route_body(FW,state="Active")
+            route_body("10.20.0.9",state="Invalid")["value"][0],
+            route_body(FW,state="Active")["value"][0]
         ]}
         self.assertTrue(self.make(FakeArm(routes=routes)).verify_nic(NIC,NSG,SUBNET))
+    def test_effective_route_table_uses_documented_array_fields(self):
+        self.assertTrue(self.make(FakeArm(routes={
+            "value":[{
+                "addressPrefix":["0.0.0.0/0"],
+                "nextHopIpAddress":[FW],
+                "nextHopType":"VirtualAppliance",
+                "state":"Active"
+            }]
+        })).verify_nic(NIC,NSG,SUBNET))
+
+    def test_multiple_firewall_next_hops_fail_closed(self):
+        with self.assertRaises(EffectiveNetworkPolicyError):
+            self.make(FakeArm(routes={
+                "value":[{
+                    "addressPrefix":["0.0.0.0/0"],
+                    "nextHopIpAddress":[FW,"10.20.0.9"],
+                    "nextHopType":"VirtualAppliance",
+                    "state":"Active"
+                }]
+            })).verify_nic(NIC,NSG,SUBNET)
+
     def test_nic_and_nsg_scope_must_match(self):
         bad=NIC.replace("dcpnic12345678","othernic")
         with self.assertRaises(EffectiveNetworkPolicyError):
