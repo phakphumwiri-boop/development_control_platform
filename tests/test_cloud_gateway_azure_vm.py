@@ -18,6 +18,9 @@ class FakeArm:
    if method=="GET": return {"properties":{"provisioningState":"Succeeded"}} if self.nic_exists else None
    if method=="DELETE": return {}
   return self.get_result if method=="GET" else {}
+class FakeNetworkPolicy:
+ def verify_nic(self,nic_id,nsg_id,subnet_id): return True
+
 def bootstrap(vm,os_name,payload):
  os_profile={"computerName":vm,"adminUsername":"dcpadmin"}
  if os_name=="linux": os_profile["linuxConfiguration"]={"disablePasswordAuthentication":True}
@@ -26,7 +29,8 @@ def bootstrap(vm,os_name,payload):
 def payload(os_name):
  p=PLATFORM_PROFILES[os_name]; return {"repository":"phakphum12345/generated-A4-pdf","workflow_run_id":123,"commit_sha":"a"*40,"target_os":os_name,"image":p["image"],"labels":list(p["labels"]),"ephemeral":True,"max_runtime_minutes":30,"network_policy":"restricted-egress","registration_token_handling":"provider-side-only"}
 class AzureVMTests(unittest.TestCase):
- def make(self,checker=None,network=None):
+ def make(self,checker=None,network="default"):
+  if network=="default": network=FakeNetworkPolicy()
   arm=FakeArm(); p=AzureVMProvider(arm,"eastus",f"/subscriptions/{SUB}/resourceGroups/net/providers/Microsoft.Network/virtualNetworks/vnet/subnets/runners",f"/subscriptions/{SUB}/resourceGroups/net/providers/Microsoft.Network/networkSecurityGroups/runner-nsg",{"linux":"Standard_D2s_v5","windows":"Standard_D4s_v5"},IMAGES,bootstrap,checker,network); return p,arm
  def test_requires_existing_subnet_nsg_and_both_vm_sizes(self):
   with self.assertRaises(ValueError): AzureVMProvider(FakeArm(),"eastus","bad","bad",{"linux":"D2"},IMAGES,bootstrap)
@@ -71,11 +75,11 @@ class AzureVMTests(unittest.TestCase):
   self.assertEqual(p.status(vm.provider_id).state,"terminating")
   self.assertTrue(any(call[0]=="DELETE" and "Microsoft.Compute/virtualMachines/" in call[1] for call in arm.calls))
  def test_readiness_requires_bootstrap_online_and_network_policy(self):
-  p,_=self.make()
+  p,_=self.make(network=None)
   self.assertFalse(p.readiness("linux")["ready"])
-  p,_=self.make(lambda _:True)
+  p,_=self.make(lambda _:True,network=None)
   self.assertFalse(p.readiness("linux")["ready"])
-  p,_=self.make(lambda *args:True,lambda os_name,subnet,nsg: True)
+  p,_=self.make(lambda *args:True)
   self.assertTrue(p.readiness("linux")["ready"])
   self.assertFalse(p.readiness("macos")["ready"])
  def test_missing_protected_bootstrap_is_rejected(self):
