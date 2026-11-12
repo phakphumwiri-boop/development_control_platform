@@ -7,6 +7,7 @@ from tools.cloud_gateway.azure_network_policy import (
 SUB="00000000-0000-0000-0000-000000000000"
 NIC=f"/subscriptions/{SUB}/resourceGroups/dcp/providers/Microsoft.Network/networkInterfaces/dcpnic12345678"
 NSG=f"/subscriptions/{SUB}/resourceGroups/net/providers/Microsoft.Network/networkSecurityGroups/runner-nsg"
+SUBNET=f"/subscriptions/{SUB}/resourceGroups/net/providers/Microsoft.Network/virtualNetworks/vnet/subnets/runners"
 FW="10.20.0.4"
 
 def nsg_body(access="Allow", include_rules=True):
@@ -16,7 +17,7 @@ def nsg_body(access="Allow", include_rules=True):
         "priority":100
     }]
     return {"value":[{
-        "association":{"networkInterface":{"id":NIC}},
+        "association":{"networkInterface":{"id":NIC},"subnet":{"id":SUBNET}},
         "networkSecurityGroup":{"id":NSG},
         "effectiveSecurityRules":rules
     }]}
@@ -55,12 +56,12 @@ class VerifierTests(unittest.TestCase):
         )
     def test_allows_explicit_outbound_allow_and_firewall_route(self):
         arm=FakeArm()
-        self.assertTrue(self.make(arm).verify_nic(NIC,NSG,"/subnets/runners"))
+        self.assertTrue(self.make(arm).verify_nic(NIC,NSG,SUBNET))
         self.assertEqual(len(arm.calls),2)
         self.assertEqual([x[0] for x in arm.calls],["POST","POST"])
     def test_denies_effective_outbound_deny(self):
         with self.assertRaises(EffectiveNetworkPolicyError):
-            self.make(FakeArm(nsg=nsg_body("Deny"))).verify_nic(NIC,NSG,"subnet")
+            self.make(FakeArm(nsg=nsg_body("Deny"))).verify_nic(NIC,NSG,SUBNET)
     def test_denies_default_allow_without_explicit_allow_rule(self):
         with self.assertRaises(EffectiveNetworkPolicyError):
             self.make(FakeArm(nsg=nsg_body(include_rules=False))).verify_nic(NIC,NSG,"subnet")
@@ -75,9 +76,9 @@ class VerifierTests(unittest.TestCase):
     def test_nic_and_nsg_scope_must_match(self):
         bad=NIC.replace("dcpnic12345678","othernic")
         with self.assertRaises(EffectiveNetworkPolicyError):
-            self.make().verify_nic(bad,NSG,"subnet")
+            self.make().verify_nic(bad,NSG,SUBNET)
         with self.assertRaises(EffectiveNetworkPolicyError):
-            self.make().verify_nic(NIC,NSG+"-other","subnet")
+            self.make().verify_nic(NIC,NSG+"-other",SUBNET)
     def test_202_accepted_is_polled_until_effective_result_is_returned(self):
         location="https://management.azure.com/subscriptions/"+SUB+"/operationResults/op?api-version=2025-05-01"
         arm=FakeArm(responses=[
