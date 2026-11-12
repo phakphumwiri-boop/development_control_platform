@@ -87,6 +87,8 @@ def _validate_egress_configuration(config: Mapping[str, str], flows) -> None:
         port = flow["port"]
         if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
             raise AzureRuntimeConfigurationError("Azure outbound flow port is invalid")
+        if not isinstance(flow["destination"], str):
+            raise AzureRuntimeConfigurationError("Azure outbound flow destination is invalid")
         try:
             destination = ipaddress.ip_network(flow["destination"], strict=False)
         except (TypeError, ValueError) as exc:
