@@ -90,7 +90,7 @@ class VerifierTests(unittest.TestCase):
         with self.assertRaises(EffectiveNetworkPolicyError):
             self.make().verify_nic(NIC,NSG+"-other",SUBNET)
     def test_202_accepted_is_polled_until_effective_result_is_returned(self):
-        location="https://management.azure.com/subscriptions/"+SUB+"/operationResults/op?api-version=2025-05-01"
+        location="https://management.azure.com/subscriptions/"+SUB+"/resourceGroups/dcp/providers/Microsoft.Network/networkInterfaces/nic/operationResults/op?api-version=2025-05-01"
         arm=FakeArm(responses=[
             (202,{"Location":location,"Retry-After":"0"},{}),
             (200,{},nsg_body()),
@@ -104,7 +104,7 @@ class VerifierTests(unittest.TestCase):
             with self.assertRaises(EffectiveNetworkPolicyError):
                 self.make(arm).verify_nic(NIC,NSG,SUBNET)
     def test_stale_or_unknown_async_operation_times_out_closed(self):
-        location="https://management.azure.com/subscriptions/"+SUB+"/operationResults/op?api-version=2025-05-01"
+        location="https://management.azure.com/subscriptions/"+SUB+"/resourceGroups/dcp/providers/Microsoft.Network/networkInterfaces/nic/operationResults/op?api-version=2025-05-01"
         ticks=[0]
         def clock(): return ticks[0]
         def sleep(seconds): ticks[0]+=max(1,seconds)
