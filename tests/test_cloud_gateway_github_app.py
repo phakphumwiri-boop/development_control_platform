@@ -358,6 +358,22 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         self.assertFalse(app.is_repository_accessible("example/not-installed"))
         self.assertEqual(len(calls), 1, "catalog should be cached for its short TTL")
 
+    def test_allowlist_narrows_private_catalog_without_exposing_other_repositories(self):
+        app = GitHubAppRunnerBootstrap(
+            "123456", 987654, self.pem, ["example/private-a"],
+            clock=lambda: 1_800_000_000,
+        )
+        app._installation_catalog_token = lambda: "catalog-token"
+        app._request = lambda *args, **kwargs: {
+            "total_count": 2,
+            "repositories": [
+                {"full_name": "example/private-a", "private": True, "default_branch": "main"},
+                {"full_name": "example/private-b", "private": True, "default_branch": "main"},
+            ],
+        }
+        catalog = app.list_installation_repositories()
+        self.assertEqual([item["full_name"] for item in catalog], ["example/private-a"])
+
     def test_dynamic_installation_catalog_fails_closed_on_malformed_repository(self):
         app = GitHubAppRunnerBootstrap(
             "123456", 987654, self.pem, [],
