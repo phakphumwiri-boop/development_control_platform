@@ -15,7 +15,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from .safe_http import open_no_redirect, read_bounded, require_json_content_type
 
 
 class GitHubAppError(RuntimeError):
@@ -90,7 +92,7 @@ class GitHubAppRunnerBootstrap:
         self._repository_catalog_cache_until = 0.0
         self.clock = clock
         self.timeout = timeout
-        self.opener = opener or urlopen
+        self.opener = opener
 
     def _app_jwt(self) -> str:
         try:
@@ -131,10 +133,10 @@ class GitHubAppRunnerBootstrap:
         request = Request(self.API_ORIGIN + path, data=body, method=method, headers=headers)
         request.add_unredirected_header("Authorization", "Bearer " + token)
         try:
-            with self.opener(request, timeout=self.timeout) as response:
-                raw = response.read(self.MAX_RESPONSE_BYTES + 1)
-            if len(raw) > self.MAX_RESPONSE_BYTES:
-                raise GitHubAppError("GitHub API response exceeded size limit")
+            with open_no_redirect(request, timeout=self.timeout, opener=self.opener) as response:
+                raw = read_bounded(response, self.MAX_RESPONSE_BYTES)
+                if raw:
+                    require_json_content_type(response)
             data = json.loads(raw.decode("utf-8")) if raw else {}
         except HTTPError as exc:
             try:
@@ -145,6 +147,8 @@ class GitHubAppRunnerBootstrap:
             raise GitHubAppError("GitHub API request failed: " + type(exc).__name__) from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise GitHubAppError("GitHub API returned malformed JSON") from exc
+        except ValueError as exc:
+            raise GitHubAppError("GitHub API response failed validation") from exc
         if not isinstance(data, (dict, list)):
             raise GitHubAppError("GitHub API returned an invalid response shape")
         return data
