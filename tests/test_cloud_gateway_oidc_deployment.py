@@ -6,6 +6,7 @@ from pathlib import Path
 from tools.cloud_gateway.oidc_config import OIDCConfigurationError
 from tools.cloud_gateway.oidc_deployment import create_oidc_wsgi_app_from_env
 from tools.cloud_gateway.oidc_wsgi import OIDCWSGIApplication
+from tools.cloud_gateway.oidc_trusted_proxy import TrustedHTTPSProxyMiddleware
 
 
 class OIDCDeploymentFactoryTests(unittest.TestCase):
@@ -36,9 +37,10 @@ class OIDCDeploymentFactoryTests(unittest.TestCase):
 
     def test_builds_wsgi_app_without_network_or_secret_access(self):
         app = self.build()
-        self.assertIsInstance(app, OIDCWSGIApplication)
+        self.assertIsInstance(app, TrustedHTTPSProxyMiddleware)
+        self.assertIsInstance(app.app, OIDCWSGIApplication)
         self.assertTrue(Path(self.env["DCP_OIDC_SESSION_DB_PATH"]).is_file())
-        self.assertFalse(hasattr(app.auth.config, "client_secret"))
+        self.assertFalse(hasattr(app.app.auth.config, "client_secret"))
 
     def test_requires_explicit_durable_session_database(self):
         env = dict(self.env)
