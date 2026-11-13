@@ -3,14 +3,20 @@ from __future__ import annotations
 import json,re,uuid
 from urllib.error import HTTPError,URLError
 from urllib.parse import quote
-from urllib.request import Request,urlopen
+from urllib.request import Request
+from tools.cloud_gateway.safe_http import open_no_redirect, read_bounded, require_json_content_type
 from tools.runner_backend.provider import RunnerInstance
+
+
+def urlopen(request, timeout=30):
+ return open_no_redirect(request, timeout=timeout)
 class AzureProvisionError(RuntimeError): pass
 API_COMPUTE="2024-03-01"; API_NETWORK="2025-05-01"
 class AzureArmClient:
  def __init__(self,subscription_id,resource_group,credential,timeout=30):
   if not re.fullmatch(r"[0-9a-fA-F-]{36}",subscription_id): raise ValueError("Invalid Azure subscription ID")
   if not re.fullmatch(r"[A-Za-z0-9_.()-]{1,90}",resource_group): raise ValueError("Invalid Azure resource group")
+  if isinstance(timeout,bool) or not isinstance(timeout,(int,float)) or not 1<=timeout<=30: raise ValueError("Azure ARM timeout must be 1..30 seconds")
   self.subscription_id=subscription_id; self.resource_group=resource_group; self.credential=credential; self.timeout=timeout
  def resource_url(self,provider,resource_type,name,api_version):
   return "https://management.azure.com/subscriptions/"+self.subscription_id+"/resourceGroups/"+quote(self.resource_group,safe="")+"/providers/"+provider+"/"+resource_type+"/"+quote(name,safe="")+"?api-version="+api_version
@@ -18,17 +24,21 @@ class AzureArmClient:
   return "/subscriptions/"+self.subscription_id+"/resourceGroups/"+self.resource_group+"/providers/"+provider+"/"+resource_type+"/"+name
  def request_with_metadata(self,method,url,payload=None):
   token=self.credential.get_token("https://management.azure.com/")
+  if not isinstance(token,str) or not token or len(token)>8192 or "\\r" in token or "\\n" in token: raise AzureProvisionError("Azure managed identity returned an invalid token")
   body=None if payload is None else json.dumps(payload,separators=(",",":")).encode()
   req=Request(url,data=body,method=method,headers={"Accept":"application/json","Content-Type":"application/json","User-Agent":"DCP-Azure-VM-Provisioner/1.0"})
   req.add_unredirected_header("Authorization","Bearer "+token)
   try:
    with urlopen(req,timeout=self.timeout) as response:
-    raw=response.read(65537); status=response.status; headers=dict(response.headers.items())
+    raw=read_bounded(response,65536); status=response.status; headers=dict(response.headers.items())
+    if raw: require_json_content_type(response)
   except HTTPError as exc:
    raise AzureProvisionError("Azure Resource Manager returned HTTP "+str(exc.code)) from exc
   except (URLError,TimeoutError) as exc:
    raise AzureProvisionError("Azure Resource Manager request failed: "+type(exc).__name__) from exc
-  if len(raw)>65536: raise AzureProvisionError("Azure response exceeded size limit")
+  except ValueError as exc:
+   if "size limit" in str(exc): raise AzureProvisionError("Azure response exceeded size limit") from exc
+   raise AzureProvisionError("Azure Resource Manager response failed validation") from exc
   if not raw: return status,headers,{}
   try: data=json.loads(raw.decode("utf-8"))
   except (UnicodeDecodeError,json.JSONDecodeError) as exc: raise AzureProvisionError("Azure returned malformed JSON") from exc
