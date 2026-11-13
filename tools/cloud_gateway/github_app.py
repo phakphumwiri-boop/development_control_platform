@@ -249,6 +249,9 @@ class GitHubAppRunnerBootstrap:
         # The DCP runner broker is private-repository-only. Public repositories
         # installed on the same GitHub App must never enter its selectable catalog.
         catalog = [item for item in catalog if item["private"] is True]
+        if self.allowed_repositories:
+            allowlist = {name.lower() for name in self.allowed_repositories}
+            catalog = [item for item in catalog if item["full_name"].lower() in allowlist]
         catalog.sort(key=lambda item: item["full_name"].lower())
         self._repository_catalog_cache = tuple(dict(item) for item in catalog)
         self._repository_catalog_cache_until = now + 60.0
