@@ -66,6 +66,23 @@ connect; the middleware is defense in depth, not a replacement for network
 isolation or a reviewed proxy configuration. The proxy must also enforce host
 validation and TLS policy before forwarding.
 
+A reviewed Nginx reference template is provided at
+`deploy/nginx/oidc-ingress.conf.example`. It uses a strict request-header
+allowlist (`proxy_pass_request_headers off`), overwrites Host and forwarded
+origin values, passes only the OIDC cookie/origin/CSRF and basic request
+headers, disables upstream retries, bounds request size and proxy timeouts, and
+rejects unknown HTTP/TLS hosts. It also routes the same-origin SPA from
+`/srv/dcp-ui`; replace that root with the reviewed UI build location.
+
+For the supplied same-host layout, bind the WSGI server to
+`127.0.0.1:8080` only and set
+`DCP_TRUSTED_PROXY_CIDRS=127.0.0.1/32`. Do not expose port 8080 on a public or
+untrusted interface. Replace `dcp.example.invalid` and certificate paths
+before use; configure `DCP_PUBLIC_ORIGIN=https://dcp.example.invalid` and
+register the exact callback URI with the selected IdP. The template requires
+Nginx 1.19.4 or later for `ssl_reject_handshake`. It is a reference
+configuration, not a deployed or production-validated reverse proxy.
+
 Use persistent, access-controlled storage with backups and single-instance
 SQLite semantics. Horizontal scaling is not supported by this SQLite session
 store without a shared transactional session/nonce backend.
