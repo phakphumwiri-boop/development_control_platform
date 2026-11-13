@@ -11,6 +11,13 @@ import urllib.error
 import urllib.request
 from urllib.parse import quote, urlparse
 
+from tools.cloud_gateway.safe_http import open_no_redirect, read_bounded, require_json_content_type
+
+
+def urlopen(request, timeout=20):
+    """Compatibility seam backed by the production no-redirect transport."""
+    return open_no_redirect(request, timeout=timeout)
+
 from .provider import RunnerInstance
 
 
@@ -24,8 +31,8 @@ class CloudAPIProvider:
         raw_url = base_url or os.getenv("DCP_RUNNER_PROVIDER_URL", "")
         self.base_url = raw_url.rstrip("/")
         self.token = token or os.getenv("DCP_RUNNER_PROVIDER_TOKEN", "")
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
-            raise ProviderError("Provider timeout must be a positive number.")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 1 <= timeout <= 30:
+            raise ProviderError("Provider timeout must be between 1 and 30 seconds.")
         self.timeout = timeout
 
         try:
@@ -47,8 +54,9 @@ class CloudAPIProvider:
             raise ProviderError(
                 "Provider URL must be an HTTPS origin without path, query, fragment, or embedded credentials."
             )
-        if not self.token:
-            raise ProviderError("DCP_RUNNER_PROVIDER_TOKEN is not configured.")
+        if (not isinstance(self.token, str) or not self.token or len(self.token) > 8192
+                or "\\r" in self.token or "\\n" in self.token):
+            raise ProviderError("DCP_RUNNER_PROVIDER_TOKEN is not configured or is invalid.")
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> RunnerInstance:
         if payload is not None and not isinstance(payload, dict):
@@ -56,22 +64,26 @@ class CloudAPIProvider:
         url = self.base_url + path
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(url, data=body, method=method, headers={
-            "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
             "Content-Type": "application/json",
             "User-Agent": "DCP-Cloud-Runner-Control-Plane/1.0",
         })
+        request.add_unredirected_header("Authorization", f"Bearer {self.token}")
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = response.read(65537)
-            if len(raw) > 65536:
-                raise ProviderError("Provider response exceeded the 65536-byte limit.")
+            with urlopen(request, timeout=self.timeout) as response:
+                raw = read_bounded(response, 65536)
+                if raw:
+                    require_json_content_type(response)
             data = json.loads(raw.decode("utf-8"))
         except ProviderError:
             raise
         except (urllib.error.URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             # Do not include exception text: URL errors can contain sensitive endpoint data.
             raise ProviderError(f"Cloud provider request failed: {type(exc).__name__}") from exc
+        except ValueError as exc:
+            if "size limit" in str(exc):
+                raise ProviderError("Provider response exceeded the 65536-byte limit.") from exc
+            raise ProviderError("Provider response failed validation.") from exc
 
         if not isinstance(data, dict):
             raise ProviderError("Provider returned an invalid response shape.")
