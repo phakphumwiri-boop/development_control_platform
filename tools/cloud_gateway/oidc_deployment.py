@@ -10,6 +10,7 @@ from .oidc_client import OIDCProvider
 from .oidc_config import OIDCConfigurationError, oidc_config_from_env
 from .oidc_session_store import OIDCSessionStore
 from .oidc_wsgi import create_oidc_wsgi_app
+from .oidc_trusted_proxy import TrustedHTTPSProxyMiddleware
 
 
 def _required(env, name: str) -> str:
@@ -45,6 +46,10 @@ def create_oidc_wsgi_app_from_env(env, *, fetch_json, post_form):
     config = oidc_config_from_env(env)
     public_origin = _required(env, "DCP_PUBLIC_ORIGIN")
     database = _required(env, "DCP_OIDC_SESSION_DB_PATH")
+    proxy_cidrs_raw = _required(env, "DCP_TRUSTED_PROXY_CIDRS")
+    proxy_cidrs = tuple(part.strip() for part in proxy_cidrs_raw.split(","))
+    if not proxy_cidrs or any(not part for part in proxy_cidrs) or len(set(proxy_cidrs)) != len(proxy_cidrs):
+        raise OIDCConfigurationError("DCP_TRUSTED_PROXY_CIDRS must contain unique comma-separated CIDRs")
     if database == ":memory:":
         raise OIDCConfigurationError("DCP_OIDC_SESSION_DB_PATH must be durable")
     owner_groups = _group_ids(env, "DCP_OIDC_OWNER_GROUPS")
@@ -67,7 +72,13 @@ def create_oidc_wsgi_app_from_env(env, *, fetch_json, post_form):
     auth = OIDCAuthService(
         config, provider, sessions, post_form, owner_groups, operator_groups
     )
-    return create_oidc_wsgi_app(
+    app = create_oidc_wsgi_app(
         auth, public_origin,
         post_login_path=env.get("DCP_OIDC_POST_LOGIN_PATH", "/"),
     )
+    try:
+        return TrustedHTTPSProxyMiddleware(
+            app, trusted_proxy_cidrs=proxy_cidrs, public_origin=public_origin
+        )
+    except ValueError as exc:
+        raise OIDCConfigurationError("trusted HTTPS proxy configuration is invalid") from exc

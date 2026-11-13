@@ -14,6 +14,9 @@ client, or enable sign-in in the existing local HTTP listener.
 - `DCP_OIDC_CLIENT_ID`: registered client ID.
 - `DCP_OIDC_REDIRECT_URI`: exact HTTPS callback URI registered at the IdP.
 - `DCP_PUBLIC_ORIGIN`: exact HTTPS origin serving the UI and auth routes.
+- `DCP_TRUSTED_PROXY_CIDRS`: comma-separated canonical IP CIDRs for the
+  immediate TLS-terminating proxy peers that connect directly to the WSGI
+  listener. Empty, malformed, or duplicate entries are rejected.
 - `DCP_OIDC_SESSION_DB_PATH`: durable SQLite file path on protected persistent
   storage; `:memory:` is rejected.
 - `DCP_OIDC_OWNER_GROUPS`: comma-separated, explicit owner group identifiers.
@@ -51,11 +54,17 @@ The two transport names above are deployment-provided callables, not
 repository functions. Do not copy the example as executable code until those
 functions have been implemented and reviewed for the chosen IdP.
 
-Mount the WSGI app only behind a trusted HTTPS reverse proxy. The proxy must
-validate the original host/scheme, strip every inbound `X-DCP-*` header, and
-keep the signer and Gateway on private channels. The WSGI adapter checks the
-forwarded HTTPS scheme and exact Host; the WSGI server must not be directly
-reachable from an untrusted network where clients can forge those values.
+Mount the WSGI app only behind a trusted HTTPS reverse proxy. The deployment
+factory wraps the OIDC application in `TrustedHTTPSProxyMiddleware`, which
+requires the immediate peer address to match `DCP_TRUSTED_PROXY_CIDRS`, accepts
+only a single `X-Forwarded-Proto: https` and exact `X-Forwarded-Host` matching
+`DCP_PUBLIC_ORIGIN`, and strips all forwarded and `X-DCP-*` headers before the
+OIDC routes run. The proxy must overwrite (not append) those forwarded headers,
+strip every inbound `X-DCP-*` header, and keep the signer and Gateway on private
+channels. Firewall the WSGI listener so only the configured proxy peers can
+connect; the middleware is defense in depth, not a replacement for network
+isolation or a reviewed proxy configuration. The proxy must also enforce host
+validation and TLS policy before forwarding.
 
 Use persistent, access-controlled storage with backups and single-instance
 SQLite semantics. Horizontal scaling is not supported by this SQLite session
@@ -72,7 +81,8 @@ store without a shared transactional session/nonce backend.
 
 Before production activation, select the IdP and register exact redirect
 URIs; implement and review the injected TLS transports and secret-manager
-integration; configure the trusted HTTPS host/proxy; then run browser E2E for
+integration; configure the trusted HTTPS host/proxy and its immediate peer
+CIDRs; then run browser E2E for
 login, callback, session, rotation, logout, invalid issuer/audience/signature,
 state/nonce replay, CSRF, role denial, spoofed headers, restart persistence,
 and iPhone Safari. Do not enable provisioning as part of identity setup.
