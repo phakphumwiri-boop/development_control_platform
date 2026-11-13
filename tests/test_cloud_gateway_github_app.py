@@ -104,6 +104,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
     def test_bearer_token_is_marked_unredirected(self):
         captured = []
         class Response:
+            headers = {"Content-Type": "application/json"}
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, size): return b"{}"
@@ -114,6 +115,34 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         request = captured[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer jwt-secret")
         self.assertTrue(any(key.lower() == "authorization" for key in request.unredirected_hdrs))
+
+    def test_request_rejects_redirects_without_following_them(self):
+        from urllib.error import HTTPError
+        calls = []
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            raise HTTPError(request.full_url, 302, "redirect", {}, None)
+        app = self.make(opener=opener)
+        with self.assertRaisesRegex(GitHubAppError, "HTTP 302"):
+            app._request("POST", "/app/installations/1/access_tokens", "jwt-secret")
+        self.assertEqual(len(calls), 1)
+        self.assertIn("api.github.com", calls[0])
+
+    def test_request_rejects_oversized_and_non_json_responses(self):
+        class Response:
+            def __init__(self, payload, content_type):
+                self.payload = payload
+                self.headers = {"Content-Type": content_type}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, size): return self.payload[:size]
+        for response in (
+            Response(b"x" * (GitHubAppRunnerBootstrap.MAX_RESPONSE_BYTES + 1), "application/json"),
+            Response(b"{}", "text/plain"),
+        ):
+            app = self.make(opener=lambda *a, response=response, **k: response)
+            with self.assertRaises(GitHubAppError):
+                app._request("GET", "/app/installations/1", "jwt-secret")
 
     def test_http_error_is_sanitized(self):
         from urllib.error import HTTPError
@@ -343,6 +372,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         class Response:
             def __init__(self, body):
                 self.body = body
+                self.headers = {"Content-Type": "application/json"}
             def __enter__(self):
                 return self
             def __exit__(self, *args):
@@ -362,6 +392,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         class Response:
             def __init__(self, body):
                 self.body = body
+                self.headers = {"Content-Type": "application/json"}
             def __enter__(self):
                 return self
             def __exit__(self, *args):
@@ -378,6 +409,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
     def test_request_accepts_github_array_response(self):
         app = self.make()
         class Response:
+            headers = {"Content-Type": "application/json"}
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return b'[{"name":"main"}]'

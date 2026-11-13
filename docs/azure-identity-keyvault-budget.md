@@ -65,3 +65,21 @@ creation rather than silently falling back to current spend only.
 ## Reference
 
 - Microsoft Learn: [Azure Consumption Budgets - Get (2023-05-01)](https://learn.microsoft.com/en-us/rest/api/consumption/budgets/get?view=rest-consumption-2023-05-01). The API defines the budget time period and notes that forecast spend is returned only when a forecast alert type is configured.
+
+
+## Secret and token transport hardening
+
+Managed Identity and Key Vault calls now use a bounded, no-redirect HTTP
+transport. Managed Identity accepts only the platform-local App Service endpoint
+with its identity header, or the explicitly enabled Azure VM IMDS endpoint.
+It validates HTTPS resource identifiers, requires a Bearer token with a future
+expiry, validates JSON content type, and rejects responses larger than 64 KiB.
+Key Vault accepts only an HTTPS `*.vault.azure.net` origin, validates secret
+names/versions, requires JSON, and applies the same 64 KiB response bound.
+Redirects are rejected rather than followed.
+
+The shared HTTP helper also provides bounded reads and redirect rejection for
+the GitHub App API client. GitHub API responses are bounded to 2 MiB and
+non-empty responses must declare a JSON media type. The HTTP opener is
+injectable for deterministic tests; production defaults use the no-redirect
+opener. Tests use mocks only and do not contact Azure or GitHub.

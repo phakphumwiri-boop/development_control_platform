@@ -55,8 +55,10 @@ The runner must be configured as ephemeral and removed after its one job.
 
 ## Validation and current limits
 
-Unit tests use generated test RSA keys and mocked responses. They do not contact
-GitHub, Key Vault, Azure Resource Manager, Orka, or create any cloud resources.
+The API transport rejects redirects, bounds response bodies to 2 MiB, and
+requires JSON content type for non-empty responses. Unit tests use generated
+test RSA keys and mocked responses. They do not contact GitHub, Key Vault,
+Azure Resource Manager, Orka, or create any cloud resources.
 A passing unit test proves the local contract only; it is not evidence that a
 GitHub App exists, is installed, or has the required permissions.
 
