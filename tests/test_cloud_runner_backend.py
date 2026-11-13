@@ -63,21 +63,21 @@ class CloudAPIProviderTests(unittest.TestCase):
     def make_provider(self, **kwargs): return CloudAPIProvider(base_url="https://gateway.example.test", token=self.TOKEN, **kwargs)
     @staticmethod
     def response(payload):
-        r=MagicMock(); r.__enter__.return_value=r
+        r=MagicMock(); r.__enter__.return_value=r; r.headers={"Content-Type":"application/json"}
         r.read.return_value=payload if isinstance(payload,bytes) else json.dumps(payload).encode()
         return r
 
-    @patch("tools.runner_backend.cloud_api.urllib.request.urlopen")
+    @patch("tools.runner_backend.cloud_api.urlopen")
     def test_provision_auth_and_json(self, urlopen):
         urlopen.return_value=self.response({"id":"req-1","state":"provisioning","labels":["dcp-cloud-linux"]})
         result=self.make_provider().provision({"target_os":"linux"})
         request=urlopen.call_args.args[0]
         self.assertEqual(request.full_url,"https://gateway.example.test/v1/runners")
-        self.assertEqual(request.get_header("Authorization"),f"Bearer {self.TOKEN}")
+        self.assertEqual(request.unredirected_hdrs.get("Authorization"),f"Bearer {self.TOKEN}")
         self.assertEqual(json.loads(request.data),{"target_os":"linux"})
         self.assertEqual(result.state,"provisioning")
 
-    @patch("tools.runner_backend.cloud_api.urllib.request.urlopen")
+    @patch("tools.runner_backend.cloud_api.urlopen")
     def test_status_and_terminate_quote_provider_id(self,urlopen):
         urlopen.return_value=self.response({"id":"a/b","state":"online"})
         p=self.make_provider(); p.status("a/b")
@@ -92,13 +92,37 @@ class CloudAPIProviderTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ProviderError): CloudAPIProvider(base_url=url,token=self.TOKEN)
         with self.assertRaises(ProviderError): CloudAPIProvider(base_url="https://gateway.example.test",token="")
 
-    @patch("tools.runner_backend.cloud_api.urllib.request.urlopen")
+    @patch("tools.runner_backend.cloud_api.urlopen")
     def test_provider_errors_do_not_leak_secrets(self,urlopen):
         urlopen.side_effect=URLError("https://gateway.example.test/private?token=do-not-leak"+self.TOKEN)
         with self.assertRaises(ProviderError) as caught: self.make_provider().provision({})
         self.assertNotIn(self.TOKEN,str(caught.exception)); self.assertNotIn("do-not-leak",str(caught.exception))
 
-    @patch("tools.runner_backend.cloud_api.urllib.request.urlopen")
+    @patch("tools.runner_backend.cloud_api.urlopen")
+    def test_provider_transport_rejects_redirects_and_invalid_json_media_type(self, urlopen):
+        from urllib.error import HTTPError
+        urlopen.side_effect = HTTPError(
+            "https://gateway.example.test/v1/runners", 302, "redirect", {}, None
+        )
+        with self.assertRaises(ProviderError):
+            self.make_provider().provision({})
+        self.assertEqual(urlopen.call_count, 1)
+
+        response = self.response({"id": "runner-1", "state": "online"})
+        response.headers = {"Content-Type": "text/plain"}
+        urlopen.side_effect = None
+        urlopen.return_value = response
+        with self.assertRaises(ProviderError):
+            self.make_provider().provision({})
+
+    def test_rejects_invalid_provider_token_and_unbounded_timeout(self):
+        for token in ("bad\\r\\nheader", "x" * 8193):
+            with self.assertRaises(ProviderError):
+                CloudAPIProvider(base_url="https://gateway.example.test", token=token)
+        with self.assertRaises(ProviderError):
+            self.make_provider(timeout=31)
+
+    @patch("tools.runner_backend.cloud_api.urlopen")
     def test_rejects_oversized_and_malformed_responses(self,urlopen):
         urlopen.return_value=self.response(b"x"*65537)
         with self.assertRaises(ProviderError): self.make_provider().provision({})
