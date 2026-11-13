@@ -67,3 +67,15 @@ All tests use mocked provider and GitHub responses. They verify:
   provisioned when their adapter declares those requirements.
 
 No live Azure, Orka, Key Vault, GitHub App, or cloud resource is contacted.
+
+
+## Provider API credential transport
+
+The control-plane-to-cloud-runner-gateway adapter uses the shared bounded
+HTTP transport. The bearer credential is added as an unredirected header,
+redirects are rejected, request timeouts are limited to 1–30 seconds, and
+non-empty responses must declare JSON media type. Response bodies are limited
+to 64 KiB and validated before provider state is accepted. Provider URL values
+must be HTTPS origins without embedded credentials, paths, queries, or
+fragments. Errors exposed to callers contain only a safe exception category;
+they never include request URLs, response bodies, or bearer credentials.
