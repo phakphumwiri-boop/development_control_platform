@@ -372,6 +372,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         class Response:
             def __init__(self, body):
                 self.body = body
+                self.headers = {"Content-Type": "application/json"}
             def __enter__(self):
                 return self
             def __exit__(self, *args):
@@ -407,6 +408,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
     def test_request_accepts_github_array_response(self):
         app = self.make()
         class Response:
+            headers = {"Content-Type": "application/json"}
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, limit): return b'[{"name":"main"}]'
