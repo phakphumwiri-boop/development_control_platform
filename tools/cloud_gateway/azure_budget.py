@@ -7,9 +7,15 @@ import re
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from .azure_identity import ManagedIdentityCredential
+from .safe_http import open_no_redirect, read_bounded, require_json_content_type
+
+
+def urlopen(request, timeout=10):
+    """Compatibility seam backed by the production no-redirect transport."""
+    return open_no_redirect(request, timeout=timeout)
 
 
 class BudgetReadError(RuntimeError):
@@ -70,6 +76,8 @@ class AzureBudgetReader:
             raise ValueError("Invalid budget name")
         self.subscription_id = subscription_id
         self.budget_name = budget_name
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 1 <= timeout <= 30:
+            raise ValueError("Azure budget timeout must be 1..30 seconds")
         self.credential = credential or ManagedIdentityCredential()
         self.timeout = timeout
 
@@ -81,15 +89,21 @@ class AzureBudgetReader:
         )
         try:
             token = self.credential.get_token("https://management.azure.com/")
+            if not isinstance(token, str) or not token or len(token) > 8192 or "\\r" in token or "\\n" in token:
+                raise ValueError("Managed identity returned an invalid token")
             req = Request(url, headers={"Accept": "application/json"})
             req.add_unredirected_header("Authorization", "Bearer " + token)
             with urlopen(req, timeout=self.timeout) as response:
-                raw = response.read(65537)
-                if len(raw) > 65536:
-                    raise BudgetReadError("Azure budget response exceeded the size limit")
+                raw = read_bounded(response, 65536)
+                if raw:
+                    require_json_content_type(response)
                 data = json.loads(raw.decode("utf-8"))
         except BudgetReadError:
             raise
+        except ValueError as exc:
+            if "size limit" in str(exc):
+                raise BudgetReadError("Azure budget response exceeded the size limit") from exc
+            raise BudgetReadError("Azure budget response failed validation") from exc
         except Exception as exc:
             raise BudgetReadError("Azure budget read failed: " + type(exc).__name__) from exc
         try:
