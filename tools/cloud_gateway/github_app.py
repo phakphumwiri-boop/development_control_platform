@@ -148,6 +148,8 @@ class GitHubAppRunnerBootstrap:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise GitHubAppError("GitHub API returned malformed JSON") from exc
         except ValueError as exc:
+            if "size limit" in str(exc):
+                raise GitHubAppError("GitHub API response exceeded size limit") from exc
             raise GitHubAppError("GitHub API response failed validation") from exc
         if not isinstance(data, (dict, list)):
             raise GitHubAppError("GitHub API returned an invalid response shape")
