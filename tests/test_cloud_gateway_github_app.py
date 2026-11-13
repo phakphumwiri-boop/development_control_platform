@@ -54,6 +54,23 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         with self.assertRaises(GitHubAppError):
             app.create_registration_token("attacker/repo")
 
+    def test_static_allowlist_cannot_authorize_public_or_uninstalled_repositories(self):
+        app = GitHubAppRunnerBootstrap(
+            "123456", 987654, self.pem, ["example/public-app"],
+            clock=lambda: 1_800_000_000,
+        )
+        app.list_installation_repositories = lambda refresh=False: [
+            {"full_name": "example/public-app", "private": False},
+            {"full_name": "example/private-app", "private": True},
+        ]
+        self.assertFalse(app.is_repository_accessible("example/public-app"))
+        self.assertFalse(app.is_repository_accessible("example/private-app"))
+
+    def test_static_allowlist_fails_closed_without_installation_catalog_evidence(self):
+        app = self.make()
+        app.list_installation_repositories = lambda refresh=False: []
+        self.assertFalse(app.is_repository_accessible("phakphum12345/generated-A4-pdf"))
+
     def test_rejects_invalid_app_configuration(self):
         with self.assertRaises(ValueError):
             GitHubAppRunnerBootstrap("not-numeric", 1, self.pem, ["owner/repo"])
