@@ -84,7 +84,7 @@ class BudgetTests(unittest.TestCase):
  def test_missing_or_mismatched_forecast_fails_closed(self):
   credential=MagicMock(); credential.get_token.return_value="token"
   for forecast in (None,{"amount":20,"unit":"THB"}):
-   response=MagicMock(); response.__enter__.return_value=response
+   response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
    body={"properties":{"timePeriod":active_period(),"amount":50,"currentSpend":{"amount":12,"unit":"USD"}}}
    if forecast is not None: body["properties"]["forecastSpend"]=forecast
    response.read.return_value=json.dumps(body).encode()
@@ -92,7 +92,7 @@ class BudgetTests(unittest.TestCase):
     with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
  def test_usage_budget_is_not_accepted_as_currency_budget(self):
   credential=MagicMock(); credential.get_token.return_value="token"
-  response=MagicMock(); response.__enter__.return_value=response
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
   body={"properties":{"category":"Usage","timePeriod":active_period(),"amount":50,"currentSpend":{"amount":12,"unit":"USD"},"forecastSpend":{"amount":35,"unit":"USD"}}}
   response.read.return_value=json.dumps(body).encode()
   with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response):
@@ -100,7 +100,7 @@ class BudgetTests(unittest.TestCase):
  def test_budget_reader_rejects_expired_budget_period(self):
   credential=MagicMock(); credential.get_token.return_value="token"
   old={"startDate":"2020-01-01T00:00:00+00:00","endDate":"2021-01-01T00:00:00+00:00"}
-  response=MagicMock(); response.__enter__.return_value=response
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
   response.read.return_value=json.dumps({"properties":{"category":"Cost","timePeriod":old,"amount":50,"currentSpend":{"amount":12,"unit":"USD"},"forecastSpend":{"amount":35,"unit":"USD"}}}).encode()
   with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response):
    with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
