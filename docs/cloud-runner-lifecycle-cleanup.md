@@ -40,15 +40,21 @@ with a provider ID remains counted against concurrency until cleanup completes.
 
 ## Orka status
 
-MacStadium announced VM User Data in Orka 4.0, allowing a script to run on first
-boot. However, the current DCP Orka adapter only implements the existing
-`vmConfig` / `customMetadata` request shape and has not verified the exact
-Orka 4.0 User Data API field, cluster version contract, or protection of the
-script from metadata/API/log exposure. A GitHub registration token must never
-be placed in `customMetadata`. The Orka provider therefore reports
-`ready=false` and the Gateway refuses provisioning until the 4.0 User Data
-contract is implemented and tested against the target cluster's own
-`/api/v1/swagger` or OpenAPI schema.
+The current publicly hosted [Orka API Server reference](https://macstadium.github.io/orka-api-docs/)
+states that it covers Orka 4.0 and later. Its published Deploy a VM request
+schema lists `vmConfig`, `customMetadata`, and other VM fields, but does not
+list `userdata`; the published VM response schema also does not list
+`userdataPhase`. The public reference links to each cluster's own
+`/api/v1/swagger`, which is the required version-specific contract.
+
+The DCP adapter contains an experimental `userdata` request path, but this
+public-documentation mismatch means that path is **not accepted as verified
+Orka API compatibility**. Keep Orka readiness false and do not invoke live
+provisioning until the target cluster's own OpenAPI schema and MacStadium
+confirm the exact field, execution semantics, exposure in API/proxy/audit logs,
+and retention behavior. A write-only response would not by itself prove that
+request bodies are absent from logs. A GitHub registration token must never
+be placed in `customMetadata`.
 
 ## Validation
 
