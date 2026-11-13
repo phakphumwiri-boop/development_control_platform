@@ -9,7 +9,7 @@ provisioning by itself.
 
 The implementation is deliberately fail-closed:
 - The GitHub App ID and installation ID are validated at startup.
-- In GitHub App mode, repositories must be present in the DCP App installation catalog. A legacy explicit allowlist remains available only when App catalog authorization is not configured.
+- Every runner operation requires current GitHub App installation-catalog membership and `private: true`. Public repositories are filtered out of the selectable catalog. The optional explicit allowlist only narrows this private catalog; it is never a fallback or proof of privacy.
 - The installation access token request is scoped to that one repository.
 - The installation must grant repository Administration write permission required by the registration-token endpoint.
 - The registration token is returned only to the provider-side caller.
@@ -20,7 +20,7 @@ The implementation is deliberately fail-closed:
 ## Required GitHub App configuration
 
 Create/configure the GitHub App outside this repository and install it only on
-all intended repositories (choose **All repositories** if every repository should appear in DCP). Grant Contents: read for branch/tag discovery and commit verification, plus
+all intended private repositories (public repositories remain excluded from DCP even if installed). Grant Contents: read for branch/tag discovery and commit verification, plus
 the minimum repository Administration permission needed to create and remove
 self-hosted runner registrations (Administration: write as required by
 GitHub's current App permission model).
@@ -30,7 +30,7 @@ Server-side settings are expected to be supplied by the deployment environment:
 - `DCP_GITHUB_APP_ID`
 - `DCP_GITHUB_APP_INSTALLATION_ID`
 - `DCP_GITHUB_APP_PRIVATE_KEY_SECRET_NAME` (a Key Vault secret name, not key content)
-- `DCP_GATEWAY_ALLOWED_REPOSITORIES` (legacy static fallback only when GitHub App installation discovery is not configured; ignored as a narrowing filter in GitHub App mode)
+- `DCP_GATEWAY_ALLOWED_REPOSITORIES` (optional comma-separated narrowing filter applied after private installation-catalog verification; never a fallback)
 
 The App private key must be retrieved server-side through the existing read-only
 Key Vault secret reader. Never put private key material, installation tokens,
@@ -40,8 +40,8 @@ strings, audit events, workflow logs, or Git history.
 ## Token flow
 
 1. Discover the installation repository catalog using a short-lived installation token with Metadata: read.
-2. For branch/tag listing and commit verification, revalidate installation membership and mint a short-lived token scoped to the selected repository with Contents: read only.
-3. For runner administration, revalidate installation membership and sign a short-lived RS256 App JWT (issued-at skew, expiry under ten minutes).
+2. For branch/tag listing and commit verification, revalidate private installation membership and mint a short-lived token scoped to the selected repository with Contents: read only.
+3. For runner administration, revalidate private installation membership and sign a short-lived RS256 App JWT (issued-at skew, expiry under ten minutes).
 4. Exchange it for an installation access token scoped to the selected repository.
 5. Require the repository Administration permission appropriate to the requested runner operation.
 6. Create that repository's Actions runner registration token.
