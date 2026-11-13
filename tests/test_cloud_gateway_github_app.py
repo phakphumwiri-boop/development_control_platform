@@ -26,12 +26,19 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         ).decode()
 
     def make(self, opener=None):
-        return GitHubAppRunnerBootstrap(
+        app = GitHubAppRunnerBootstrap(
             "123456", 987654, self.pem,
             ["phakphum12345/generated-A4-pdf"],
             clock=lambda: 1_800_000_000,
             opener=opener,
         )
+        app.list_installation_repositories = lambda refresh=False: [{
+            "full_name": "phakphum12345/generated-A4-pdf",
+            "private": True,
+            "default_branch": "main",
+            "permissions": {},
+        }]
+        return app
 
     def test_jwt_is_rs256_and_short_lived(self):
         jwt = self.make()._app_jwt()
@@ -46,6 +53,23 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         app = self.make()
         with self.assertRaises(GitHubAppError):
             app.create_registration_token("attacker/repo")
+
+    def test_static_allowlist_cannot_authorize_public_or_uninstalled_repositories(self):
+        app = GitHubAppRunnerBootstrap(
+            "123456", 987654, self.pem, ["example/public-app"],
+            clock=lambda: 1_800_000_000,
+        )
+        app.list_installation_repositories = lambda refresh=False: [
+            {"full_name": "example/public-app", "private": False},
+            {"full_name": "example/private-app", "private": True},
+        ]
+        self.assertFalse(app.is_repository_accessible("example/public-app"))
+        self.assertFalse(app.is_repository_accessible("example/private-app"))
+
+    def test_static_allowlist_fails_closed_without_installation_catalog_evidence(self):
+        app = self.make()
+        app.list_installation_repositories = lambda refresh=False: []
+        self.assertFalse(app.is_repository_accessible("phakphum12345/generated-A4-pdf"))
 
     def test_rejects_invalid_app_configuration(self):
         with self.assertRaises(ValueError):
@@ -294,7 +318,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         ))
         self.assertEqual(calls[0][3], {"permissions": {"metadata": "read"}})
 
-    def test_dynamic_installation_catalog_lists_only_installed_repositories(self):
+    def test_dynamic_installation_catalog_lists_only_private_installed_repositories(self):
         app = GitHubAppRunnerBootstrap(
             "123456", 987654, self.pem, [],
             clock=lambda: 1_800_000_000,
@@ -325,15 +349,30 @@ class GitHubAppBootstrapTests(unittest.TestCase):
 
         app._request = request
         catalog = app.list_installation_repositories()
-        self.assertEqual([item["full_name"] for item in catalog], [
-            "example/private-app", "example/public-app"
-        ])
+        self.assertEqual([item["full_name"] for item in catalog], ["example/private-app"])
         self.assertTrue(catalog[0]["private"])
         self.assertEqual(catalog[0]["permissions"], {"admin": True, "push": True})
         self.assertNotIn("html_url", catalog[0])
         self.assertTrue(app.is_repository_accessible("example/private-app"))
+        self.assertFalse(app.is_repository_accessible("example/public-app"))
         self.assertFalse(app.is_repository_accessible("example/not-installed"))
         self.assertEqual(len(calls), 1, "catalog should be cached for its short TTL")
+
+    def test_allowlist_narrows_private_catalog_without_exposing_other_repositories(self):
+        app = GitHubAppRunnerBootstrap(
+            "123456", 987654, self.pem, ["example/private-a"],
+            clock=lambda: 1_800_000_000,
+        )
+        app._installation_catalog_token = lambda: "catalog-token"
+        app._request = lambda *args, **kwargs: {
+            "total_count": 2,
+            "repositories": [
+                {"full_name": "example/private-a", "private": True, "default_branch": "main"},
+                {"full_name": "example/private-b", "private": True, "default_branch": "main"},
+            ],
+        }
+        catalog = app.list_installation_repositories()
+        self.assertEqual([item["full_name"] for item in catalog], ["example/private-a"])
 
     def test_dynamic_installation_catalog_fails_closed_on_malformed_repository(self):
         app = GitHubAppRunnerBootstrap(

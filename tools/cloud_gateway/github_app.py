@@ -246,6 +246,12 @@ class GitHubAppRunnerBootstrap:
         else:
             raise GitHubAppError("GitHub installation repository catalog exceeded pagination limit")
 
+        # The DCP runner broker is private-repository-only. Public repositories
+        # installed on the same GitHub App must never enter its selectable catalog.
+        catalog = [item for item in catalog if item["private"] is True]
+        if self.allowed_repositories:
+            allowlist = {name.lower() for name in self.allowed_repositories}
+            catalog = [item for item in catalog if item["full_name"].lower() in allowlist]
         catalog.sort(key=lambda item: item["full_name"].lower())
         self._repository_catalog_cache = tuple(dict(item) for item in catalog)
         self._repository_catalog_cache_until = now + 60.0
@@ -256,10 +262,14 @@ class GitHubAppRunnerBootstrap:
             r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}", repository
         ):
             return False
-        if self.allowed_repositories:
-            return repository in self.allowed_repositories
+        if (self.allowed_repositories
+                and repository.lower() not in {item.lower() for item in self.allowed_repositories}):
+            return False
+        # A static allowlist is only a narrowing filter, never proof of current
+        # installation membership or repository privacy. Require live catalog
+        # evidence and fail closed when it is unavailable.
         return any(
-            item["full_name"].lower() == repository.lower()
+            item["private"] is True and item["full_name"].lower() == repository.lower()
             for item in self.list_installation_repositories(refresh=refresh)
         )
 
