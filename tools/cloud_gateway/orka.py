@@ -3,8 +3,13 @@ from __future__ import annotations
 import json,re,uuid
 from urllib.error import HTTPError,URLError
 from urllib.parse import quote,urlparse
-from urllib.request import Request,urlopen
+from urllib.request import Request
+from tools.cloud_gateway.safe_http import open_no_redirect, read_bounded, require_json_content_type
 from tools.runner_backend.provider import RunnerInstance
+
+
+def urlopen(request, timeout=20):
+ return open_no_redirect(request, timeout=timeout)
 
 class OrkaError(RuntimeError): pass
 class OrkaProvider:
@@ -17,15 +22,19 @@ class OrkaProvider:
   if not re.fullmatch(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?",namespace): raise ValueError("Invalid Orka namespace")
   if not re.fullmatch(r"[A-Za-z0-9_.-]{1,63}",vm_config): raise ValueError("Invalid approved Orka VM config")
   if not re.fullmatch(r"[A-Za-z0-9-]{1,127}",secret_name): raise ValueError("Invalid Key Vault secret name")
+  if isinstance(timeout,bool) or not isinstance(timeout,(int,float)) or not 1<=timeout<=30: raise ValueError("Orka timeout must be 1..30 seconds")
   self.base=base_url.rstrip("/"); self.namespace=namespace; self.vm_config=vm_config
   self.secret_reader=secret_reader; self.secret_name=secret_name; self.online=runner_online_checker; self.runner_userdata_factory=runner_userdata_factory; self.timeout=timeout
  def _request(self,method,path,payload=None,allow_missing=False):
   token=self.secret_reader.get_secret(self.secret_name)
+  if not isinstance(token,str) or not token or len(token)>8192 or "\\r" in token or "\\n" in token: raise OrkaError("Orka API credential is invalid")
   body=None if payload is None else json.dumps(payload,separators=(",",":")).encode()
   req=Request(self.base+path,data=body,method=method,headers={"Accept":"application/json","Content-Type":"application/json","User-Agent":"DCP-Orka-Adapter/1.0"})
   req.add_unredirected_header("Authorization","Bearer "+token)
   try:
-   with urlopen(req,timeout=self.timeout) as response: raw=response.read(65537)
+   with urlopen(req,timeout=self.timeout) as response:
+    raw=read_bounded(response,65536)
+    if raw: require_json_content_type(response)
   except HTTPError as exc:
    try:
     if allow_missing and exc.code==404: return None
@@ -33,7 +42,9 @@ class OrkaProvider:
    finally:
     exc.close()
   except (URLError,TimeoutError) as exc: raise OrkaError("Orka API request failed: "+type(exc).__name__) from exc
-  if len(raw)>65536: raise OrkaError("Orka response exceeded size limit")
+  except ValueError as exc:
+   if "size limit" in str(exc): raise OrkaError("Orka response exceeded size limit") from exc
+   raise OrkaError("Orka API response failed validation") from exc
   if not raw: return {}
   try: data=json.loads(raw.decode("utf-8"))
   except (UnicodeDecodeError,json.JSONDecodeError) as exc: raise OrkaError("Orka returned malformed JSON") from exc
