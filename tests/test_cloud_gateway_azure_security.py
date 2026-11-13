@@ -1,5 +1,5 @@
 """Mock-only tests for Managed Identity, Key Vault, and Azure budget reads."""
-import json,unittest
+import json,unittest,time
 from datetime import datetime,timedelta,timezone
 from unittest.mock import patch,MagicMock
 from tools.cloud_gateway.azure_identity import ManagedIdentityCredential,IdentityError
@@ -11,7 +11,7 @@ class CredentialTests(unittest.TestCase):
   with self.assertRaises(IdentityError): ManagedIdentityCredential(env={}).get_token("https://vault.azure.net")
  def test_identity_endpoint_uses_local_header_and_resource(self):
   env={"IDENTITY_ENDPOINT":"http://localhost:42356/msi/token","IDENTITY_HEADER":"header-value"}
-  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=json.dumps({"access_token":"opaque-token"}).encode()
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}; response.read.return_value=json.dumps({"access_token":"opaque-token","token_type":"Bearer","expires_on":str(int(time.time())+3600)}).encode()
   with patch("tools.cloud_gateway.azure_identity.urlopen",return_value=response) as call:
    self.assertEqual(ManagedIdentityCredential(env).get_token("https://vault.azure.net"),"opaque-token")
   req=call.call_args.args[0]; self.assertEqual(req.get_header("X-identity-header"),"header-value"); self.assertTrue(any(k.lower()=="x-identity-header" for k in req.unredirected_hdrs)); self.assertIn("resource=https%3A%2F%2Fvault.azure.net",req.full_url)
@@ -33,7 +33,7 @@ class KeyVaultTests(unittest.TestCase):
   with self.assertRaises(ValueError): KeyVaultSecretReader("https://example.com")
  def test_secret_read_uses_managed_identity_and_never_logs_value(self):
   credential=MagicMock(); credential.get_token.return_value="access"
-  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b'{"value":"secret-value"}'
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}; response.read.return_value=b'{"value":"secret-value"}'
   with patch("tools.cloud_gateway.key_vault.urlopen",return_value=response) as call:
    value=KeyVaultSecretReader("https://demo.vault.azure.net",credential).get_secret("orka-token")
   self.assertEqual(value,"secret-value"); req=call.call_args.args[0]; self.assertIn("/secrets/orka-token?api-version=7.4",req.full_url); self.assertTrue(any(k.lower()=="authorization" for k in req.unredirected_hdrs))
