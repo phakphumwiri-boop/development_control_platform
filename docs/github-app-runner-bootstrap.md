@@ -40,8 +40,8 @@ strings, audit events, workflow logs, or Git history.
 ## Token flow
 
 1. Discover the installation repository catalog using a short-lived installation token with Metadata: read.
-2. For branch/tag listing and commit verification, revalidate installation membership and mint a short-lived token scoped to the selected repository with Contents: read only.
-3. For runner administration, revalidate installation membership and sign a short-lived RS256 App JWT (issued-at skew, expiry under ten minutes).
+2. For branch/tag listing and commit verification, revalidate private installation membership and mint a short-lived token scoped to the selected repository with Contents: read only.
+3. For runner administration, revalidate private installation membership and sign a short-lived RS256 App JWT (issued-at skew, expiry under ten minutes).
 4. Exchange it for an installation access token scoped to the selected repository.
 5. Require the repository Administration permission appropriate to the requested runner operation.
 6. Create that repository's Actions runner registration token.
