@@ -17,6 +17,7 @@ class OIDCDeploymentFactoryTests(unittest.TestCase):
             "DCP_OIDC_REDIRECT_URI": "https://dcp.example.test/api/auth/oidc/callback",
             "DCP_PUBLIC_ORIGIN": "https://dcp.example.test",
             "DCP_OIDC_SESSION_DB_PATH": str(Path(self.temp.name) / "oidc.sqlite"),
+            "DCP_TRUSTED_PROXY_CIDRS": "127.0.0.1/32",
             "DCP_OIDC_OWNER_GROUPS": "owners,owners-secondary",
             "DCP_OIDC_OPERATOR_GROUPS": "operators",
         }
@@ -45,6 +46,18 @@ class OIDCDeploymentFactoryTests(unittest.TestCase):
         with self.assertRaises(OIDCConfigurationError):
             self.build(env)
         env = dict(self.env, DCP_OIDC_SESSION_DB_PATH=":memory:")
+        with self.assertRaises(OIDCConfigurationError):
+            self.build(env)
+
+    def test_requires_explicit_trusted_proxy_allowlist(self):
+        env = dict(self.env)
+        del env["DCP_TRUSTED_PROXY_CIDRS"]
+        with self.assertRaises(OIDCConfigurationError):
+            self.build(env)
+        env = dict(self.env, DCP_TRUSTED_PROXY_CIDRS="127.0.0.1/32,")
+        with self.assertRaises(OIDCConfigurationError):
+            self.build(env)
+        env = dict(self.env, DCP_TRUSTED_PROXY_CIDRS="invalid")
         with self.assertRaises(OIDCConfigurationError):
             self.build(env)
 
