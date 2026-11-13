@@ -11,6 +11,11 @@ from urllib.request import Request
 from .safe_http import open_no_redirect, read_bounded, require_json_content_type
 
 
+def urlopen(request, timeout=3):
+    """Compatibility seam backed by the production no-redirect transport."""
+    return open_no_redirect(request, timeout=timeout)
+
+
 class IdentityError(RuntimeError):
     pass
 
@@ -79,7 +84,9 @@ class ManagedIdentityCredential:
             headers["X-IDENTITY-HEADER"] = identity_header
         try:
             request = Request(url, headers=headers, method="GET")
-            with open_no_redirect(request, timeout=self.timeout, opener=self.opener) as response:
+            response_context = (urlopen(request, timeout=self.timeout) if self.opener is None
+                                else open_no_redirect(request, timeout=self.timeout, opener=self.opener))
+            with response_context as response:
                 require_json_content_type(response)
                 raw = read_bounded(response, self.MAX_RESPONSE_BYTES)
             data = json.loads(raw.decode("utf-8"))
