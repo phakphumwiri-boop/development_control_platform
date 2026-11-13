@@ -392,6 +392,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
         class Response:
             def __init__(self, body):
                 self.body = body
+                self.headers = {"Content-Type": "application/json"}
             def __enter__(self):
                 return self
             def __exit__(self, *args):
