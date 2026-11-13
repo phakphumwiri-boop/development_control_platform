@@ -104,6 +104,7 @@ class GitHubAppBootstrapTests(unittest.TestCase):
     def test_bearer_token_is_marked_unredirected(self):
         captured = []
         class Response:
+            headers = {"Content-Type": "application/json"}
             def __enter__(self): return self
             def __exit__(self, *args): return False
             def read(self, size): return b"{}"
