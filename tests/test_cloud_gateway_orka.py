@@ -7,7 +7,7 @@ from tools.runner_backend.manager import PLATFORM_PROFILES
 def request():
  p=PLATFORM_PROFILES["macos"]; return {"repository":"phakphum12345/generated-A4-pdf","workflow_run_id":123,"commit_sha":"a"*40,"target_os":"macos","image":p["image"],"labels":list(p["labels"]),"ephemeral":True,"max_runtime_minutes":30,"network_policy":"restricted-egress","registration_token_handling":"provider-side-only"}
 def response(data):
- r=MagicMock(); r.__enter__.return_value=r; r.read.return_value=json.dumps(data).encode(); return r
+ r=MagicMock(); r.__enter__.return_value=r; r.headers={"Content-Type":"application/json"}; r.read.return_value=json.dumps(data).encode(); return r
 class SecretReader:
  def get_secret(self,name): return "mock-bearer"
 class OrkaTests(unittest.TestCase):
