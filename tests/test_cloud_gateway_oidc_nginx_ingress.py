@@ -19,6 +19,8 @@ class OIDCNginxIngressTests(unittest.TestCase):
         self.assertIn("proxy_pass http://127.0.0.1:8080;", self.config)
         self.assertIn("proxy_pass_request_headers off;", self.config)
         self.assertIn("proxy_pass_request_body on;", self.config)
+        self.assertIn("limit_except GET POST { deny all; }", self.config)
+        self.assertIn("proxy_redirect off;", self.config)
         self.assertIn("proxy_set_header Host dcp.example.invalid;", self.config)
         self.assertIn("proxy_set_header X-Forwarded-Host dcp.example.invalid;", self.config)
         self.assertIn("proxy_set_header X-Forwarded-Proto https;", self.config)
