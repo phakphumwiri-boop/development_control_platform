@@ -21,12 +21,23 @@ class CredentialTests(unittest.TestCase):
 class AzureArmHeaderTests(unittest.TestCase):
  def test_arm_bearer_token_is_unredirected(self):
   credential=MagicMock(); credential.get_token.return_value="arm-token"
-  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b"{}"; response.status=200; response.headers={}
+  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b"{}"; response.status=200; response.headers={"Content-Type":"application/json"}
   with patch("tools.cloud_gateway.azure_vm.urlopen",return_value=response) as call:
    AzureArmClient("00000000-0000-0000-0000-000000000000","dcp",credential).request("GET","https://management.azure.com/subscriptions/test")
   req=call.call_args.args[0]
   self.assertEqual(req.get_header("Authorization"),"Bearer arm-token")
   self.assertTrue(any(k.lower()=="authorization" for k in req.unredirected_hdrs))
+
+ def test_arm_transport_rejects_redirects_and_non_json_responses(self):
+  from urllib.error import HTTPError
+  from tools.cloud_gateway.azure_vm import AzureProvisionError
+  credential=MagicMock(); credential.get_token.return_value="arm-token"
+  with patch("tools.cloud_gateway.azure_vm.urlopen",side_effect=HTTPError("url",302,"redirect",{},None)) as call:
+   with self.assertRaises(AzureProvisionError): AzureArmClient("00000000-0000-0000-0000-000000000000","dcp",credential).request("GET","https://management.azure.com/subscriptions/test")
+  self.assertEqual(call.call_count,1)
+  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b"{}"; response.status=200; response.headers={"Content-Type":"text/plain"}
+  with patch("tools.cloud_gateway.azure_vm.urlopen",return_value=response):
+   with self.assertRaises(AzureProvisionError): AzureArmClient("00000000-0000-0000-0000-000000000000","dcp",credential).request("GET","https://management.azure.com/subscriptions/test")
 
 class KeyVaultTests(unittest.TestCase):
  def test_rejects_non_azure_vault_origin(self):
@@ -52,19 +63,28 @@ class BudgetTests(unittest.TestCase):
   self.assertFalse(BudgetSnapshot(100,20,None,"THB").permits(1))
  def test_budget_reader_is_read_only_and_parses_budget(self):
   credential=MagicMock(); credential.get_token.return_value="arm-token"
-  response=MagicMock(); response.__enter__.return_value=response
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
   response.read.return_value=json.dumps({"properties":{"category":"Cost","timePeriod":active_period(),"amount":50,"currentSpend":{"amount":12,"unit":"USD"},"forecastSpend":{"amount":35,"unit":"USD"}}}).encode()
   with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response) as call:
    snapshot=AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-monthly",credential).read()
   self.assertEqual(snapshot.current_spend,12); self.assertTrue(snapshot.permits(3))
   req=call.call_args.args[0]; self.assertEqual(req.get_method(),"GET"); self.assertTrue(any(k.lower()=="authorization" for k in req.unredirected_hdrs))
+ def test_budget_transport_rejects_redirects_and_non_json_responses(self):
+  from urllib.error import HTTPError
+  credential=MagicMock(); credential.get_token.return_value="arm-token"
+  with patch("tools.cloud_gateway.azure_budget.urlopen",side_effect=HTTPError("url",302,"redirect",{},None)) as call:
+   with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
+  self.assertEqual(call.call_count,1)
+  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b'{"properties":{}}'; response.headers={"Content-Type":"text/plain"}
+  with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response):
+   with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
  def test_budget_snapshot_rejects_nonfinite_and_negative_values(self):
   for values in ((float("nan"),1,1,"USD"),(100,-1,1,"USD"),(100,1,float("inf"),"USD"),(100,20,10,"USD")):
    with self.assertRaises(ValueError): BudgetSnapshot(*values)
  def test_missing_or_mismatched_forecast_fails_closed(self):
   credential=MagicMock(); credential.get_token.return_value="token"
   for forecast in (None,{"amount":20,"unit":"THB"}):
-   response=MagicMock(); response.__enter__.return_value=response
+   response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
    body={"properties":{"timePeriod":active_period(),"amount":50,"currentSpend":{"amount":12,"unit":"USD"}}}
    if forecast is not None: body["properties"]["forecastSpend"]=forecast
    response.read.return_value=json.dumps(body).encode()
@@ -72,7 +92,7 @@ class BudgetTests(unittest.TestCase):
     with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
  def test_usage_budget_is_not_accepted_as_currency_budget(self):
   credential=MagicMock(); credential.get_token.return_value="token"
-  response=MagicMock(); response.__enter__.return_value=response
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
   body={"properties":{"category":"Usage","timePeriod":active_period(),"amount":50,"currentSpend":{"amount":12,"unit":"USD"},"forecastSpend":{"amount":35,"unit":"USD"}}}
   response.read.return_value=json.dumps(body).encode()
   with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response):
@@ -80,13 +100,13 @@ class BudgetTests(unittest.TestCase):
  def test_budget_reader_rejects_expired_budget_period(self):
   credential=MagicMock(); credential.get_token.return_value="token"
   old={"startDate":"2020-01-01T00:00:00+00:00","endDate":"2021-01-01T00:00:00+00:00"}
-  response=MagicMock(); response.__enter__.return_value=response
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}
   response.read.return_value=json.dumps({"properties":{"category":"Cost","timePeriod":old,"amount":50,"currentSpend":{"amount":12,"unit":"USD"},"forecastSpend":{"amount":35,"unit":"USD"}}}).encode()
   with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response):
    with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
  def test_invalid_budget_data_fails_closed(self):
   credential=MagicMock(); credential.get_token.return_value="token"
-  response=MagicMock(); response.__enter__.return_value=response; response.read.return_value=b'{}'
+  response=MagicMock(); response.__enter__.return_value=response; response.headers={"Content-Type":"application/json"}; response.read.return_value=b'{}'
   with patch("tools.cloud_gateway.azure_budget.urlopen",return_value=response):
    with self.assertRaises(BudgetReadError): AzureBudgetReader("00000000-0000-0000-0000-000000000000","dcp-budget",credential).read()
 if __name__=="__main__": unittest.main()

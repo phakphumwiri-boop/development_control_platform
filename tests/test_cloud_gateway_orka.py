@@ -7,7 +7,7 @@ from tools.runner_backend.manager import PLATFORM_PROFILES
 def request():
  p=PLATFORM_PROFILES["macos"]; return {"repository":"phakphum12345/generated-A4-pdf","workflow_run_id":123,"commit_sha":"a"*40,"target_os":"macos","image":p["image"],"labels":list(p["labels"]),"ephemeral":True,"max_runtime_minutes":30,"network_policy":"restricted-egress","registration_token_handling":"provider-side-only"}
 def response(data):
- r=MagicMock(); r.__enter__.return_value=r; r.read.return_value=json.dumps(data).encode(); return r
+ r=MagicMock(); r.__enter__.return_value=r; r.headers={"Content-Type":"application/json"}; r.read.return_value=json.dumps(data).encode(); return r
 class SecretReader:
  def get_secret(self,name): return "mock-bearer"
 class OrkaTests(unittest.TestCase):
@@ -63,6 +63,25 @@ class OrkaTests(unittest.TestCase):
   readiness=p.readiness("macos")
   self.assertFalse(readiness["ready"])
   self.assertIn("User Data exposure controls",readiness["message"])
+ def test_transport_rejects_redirects_and_non_json_responses(self):
+  p=self.make()
+  with patch("tools.cloud_gateway.orka.urlopen",side_effect=HTTPError("url",302,"redirect",{},None)) as call:
+   with self.assertRaises(OrkaError): p.list_images()
+  self.assertEqual(call.call_count,1)
+  r=MagicMock(); r.__enter__.return_value=r; r.headers={"Content-Type":"text/plain"}; r.read.return_value=b'{"items":[]}'
+  with patch("tools.cloud_gateway.orka.urlopen",return_value=r):
+   with self.assertRaises(OrkaError): p.list_images()
+
+ def test_rejects_invalid_secret_and_timeout(self):
+  class BadSecretReader:
+   def get_secret(self,name): return "bad\\r\\nheader"
+  p=OrkaProvider("https://orka.example.test","dcp","macos15-arm64",BadSecretReader())
+  with patch("tools.cloud_gateway.orka.urlopen") as call:
+   with self.assertRaises(OrkaError): p.list_images()
+  call.assert_not_called()
+  with self.assertRaises(ValueError):
+   OrkaProvider("https://orka.example.test","dcp","macos15-arm64",SecretReader(),timeout=31)
+
  def test_provider_errors_do_not_echo_credentials(self):
   p=self.make()
   with patch("tools.cloud_gateway.orka.urlopen",side_effect=HTTPError("url",401,"denied",{},None)):

@@ -83,3 +83,10 @@ the GitHub App API client. GitHub API responses are bounded to 2 MiB and
 non-empty responses must declare a JSON media type. The HTTP opener is
 injectable for deterministic tests; production defaults use the no-redirect
 opener. Tests use mocks only and do not contact Azure or GitHub.
+
+
+Azure Resource Manager and Consumption Budget reads use the same no-redirect
+transport. Their managed-identity bearer headers are unredirected, request
+timeouts are bounded to 1–30 seconds, non-empty responses must declare JSON,
+and response bodies are capped at 64 KiB. Invalid credential material and
+transport responses fail closed without exposing token contents.

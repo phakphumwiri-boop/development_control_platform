@@ -31,3 +31,13 @@ the request body is never logged. Never put GitHub registration tokens in
 `customMetadata`.
 
 The Gateway selects budget guards by provider. Orka requests require a separate guard keyed to `orka`; an Azure Consumption budget is never accepted as evidence for Orka spend. A generic provider-budget guard contract is available, but no Orka billing reader or provider budget source is configured or verified. Therefore Orka readiness remains false until an authoritative Orka/MacStadium cost source, forecast semantics, currency, and freshness policy are implemented and tested. No Orka capacity was allocated by tests.
+
+
+The Orka adapter's API calls also use the shared no-redirect, bounded transport.
+The Key Vault bearer token is validated, placed in an unredirected header,
+never forwarded through a redirect, and responses are limited to 64 KiB with
+JSON media-type validation. This transport hardening does not change the
+acceptance gate: Orka readiness remains false until the target cluster's
+User Data schema/execution semantics, data exposure and retention controls,
+independent runner-online verification, and authoritative provider-specific
+budget source are verified.
