@@ -79,11 +79,10 @@ class ManagedIdentityCredential:
                 raise IdentityError("Invalid managed identity client ID")
             params["client_id"] = client_id
         url = endpoint + "?" + urlencode(params)
-        headers = {"Metadata": "true"}
-        if identity_header:
-            headers["X-IDENTITY-HEADER"] = identity_header
         try:
-            request = Request(url, headers=headers, method="GET")
+            request = Request(url, headers={"Metadata": "true"}, method="GET")
+            if identity_header:
+                request.add_unredirected_header("X-IDENTITY-HEADER", identity_header)
             response_context = (urlopen(request, timeout=self.timeout) if self.opener is None
                                 else open_no_redirect(request, timeout=self.timeout, opener=self.opener))
             with response_context as response:
